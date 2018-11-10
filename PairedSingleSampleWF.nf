@@ -60,8 +60,9 @@ params.help = false
 params.reads = false
 params.singleEnd = false
 params.run_id = false
-params.aligner = 'bwa' //Default, but stay tuned for later ;-)
+//params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
+params.exome = true
 
 
 // Output configuration
@@ -72,13 +73,12 @@ params.saveIntermediateVariants = false
 
 // Clipping options
 params.notrim = false
+params.saveTrimmed = false
 params.clip_r1 = 0
 params.clip_r2 = 0
 params.three_prime_clip_r1 = 0
 params.three_prime_clip_r2 = 0
 
-// Kit options
-params.kit = 'agilent_v5'
 
 // Has the run name been specified by the user?
 // this has the bonus effect of catching both -name and --name
@@ -171,7 +171,7 @@ try {
 
 // Build BWA Index if this is required
 
-if(params.aligner == 'bwa' && !params.bwa_index){
+if(! params.bwa_index){
     // Create Channels
     fasta_for_bwa_index = Channel
         .fromPath("${params.gfasta}")
@@ -179,6 +179,8 @@ if(params.aligner == 'bwa' && !params.bwa_index){
         .fromPath("${params.gfasta}")
     // Create a BWA index for non-indexed genomes
     process makeBWAIndex {
+
+
         tag "$params.gfasta"
         publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
                    saveAs: { params.saveReference ? it : null }, mode: 'copy'
@@ -196,6 +198,7 @@ if(params.aligner == 'bwa' && !params.bwa_index){
     }
     // Create a FastA index for non-indexed genomes
     process makeFastaIndex {
+
         tag "$params.gfasta"
         publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
                    saveAs: { params.saveReference ? it : null }, mode: 'copy'
@@ -222,6 +225,7 @@ if(params.aligner == 'bwa' && !params.bwa_index){
 */
 
 process fastqc {
+
     tag "$name"
         publishDir "${params.outdir}/fastqc", mode: 'copy',
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
@@ -308,7 +312,7 @@ process bwamem {
     -t ${task.cpus} \\
     $params.gfasta \\
     $reads \\
-    | samtools ${avail_mem} sort -O bam - > $outfile ${name}_bwa.bam
+    | samtools sort ${avail_mem} -O bam -T - >${name}_bwa.bam
     """
 }
 
@@ -318,6 +322,7 @@ process bwamem {
 */
 
 process markDuplicates {
+
     tag "${name}"
     publishDir "${params.outdir}/Picard_Markduplicates/metrics", mode: 'copy',
         saveAs: { filename -> filename.indexOf(".dup_metrics") > 0 ? filename : null }
@@ -333,14 +338,14 @@ process markDuplicates {
     script:
     """
         mkdir `pwd`/tmp
-        gatk-launch MarkDuplicates \\
-        --INPUT $sorted_bam \\
-        --OUTPUT ${name}_markdup.bam \\
-        --METRICS_FILE ${name}.dup_metrics \\
-        --REMOVE_DUPLICATES false \\
-        --CREATE_INDEX true \\
-        --TMP_DIR=`pwd`/tmp \\
-        --java-options -Xmx${task.memory.toGiga()}g
+        java -Xmx${task.memory.toGiga()}g -jar $PICARD MarkDuplicates \\
+        INPUT=$sorted_bam \\
+        OUTPUT=${name}_markdup.bam \\
+        METRICS_FILE=${name}.dup_metrics \\
+        REMOVE_DUPLICATES=false \\
+        CREATE_INDEX=true \\
+        TMP_DIR=`pwd`/tmp
+       
     """
 }
 
@@ -367,7 +372,7 @@ process recal_bam_files {
     script:
     if(params.exome){
     """
-    gatk-launch BaseRecalibrator \\
+    gatk BaseRecalibrator \\
         -R $params.gfasta \\
         -I $markdup_bam \\
         -O ${name}_table.recal \\
@@ -378,7 +383,7 @@ process recal_bam_files {
     """
     } else {
     """
-    gatk-launch BaseRecalibrator \\
+    gatk BaseRecalibrator \\
         -R $params.gfasta \\
         -I $markdup_bam \\
         -O ${name}_table.recal \\
@@ -403,7 +408,7 @@ process applyBQSR {
     script:
     if(params.exome){
     """
-    gatk-launch ApplyBQSR \\
+    gatk ApplyBQSR \\
         -R $params.gfasta \\
         -I $markdup_bam \\
         --bqsr-recal-file ${name}_table.recal \\
@@ -414,7 +419,7 @@ process applyBQSR {
     """
     } else {
     """
-    gatk-launch ApplyBQSR \\
+    gatk ApplyBQSR \\
         -R $params.gfasta \\
         -I $markdup_bam \\
         --bqsr-recal-file ${name}_table.recal \\
@@ -430,6 +435,8 @@ process applyBQSR {
  * Step 7 - Determine quality metrics of mapped BAM files using QualiMap 2
  *
 */
+
+/*
 process qualiMap {
     tag "${name}"
     publishDir "${params.outdir}/Qualimap", mode: 'copy'
@@ -458,11 +465,13 @@ process qualiMap {
     --java-mem-size=${task.memory.toGiga()}G \\
     """
 }
+*/
 
 /*
  * Step 8 - Call Variants with HaplotypeCaller in GVCF mode (differentiate between exome and whole genome data here)
  *
 */
+
 process variantCall {
     tag "${name}"
     publishDir "${params.outdir}/GATK_VariantCalling/", mode: 'copy',
@@ -477,7 +486,7 @@ process variantCall {
     script:
     if(params.exome){
     """
-    gatk-launch HaplotypeCaller \\
+    gatk HaplotypeCaller \\
         -I $realign_bam \\
         -R $params.gfasta \\
         -O ${name}_variants.vcf \\
@@ -496,7 +505,7 @@ process variantCall {
     """
     } else { //We have a winner (genome)
     """
-    gatk-launch HaplotypeCaller \\
+    gatk HaplotypeCaller \\
         -I $realign_bam \\
         -R $params.gfasta \\
         -O ${name}_variants.vcf \\
@@ -521,8 +530,10 @@ process variantCall {
 * This is then parsed by MultiQC and the report feature to produce a final report with the software Versions in the pipeline.
 */
 
-process get_software_versions {
 
+/*
+process get_software_versions {
+    
     output:
     file 'software_versions_mqc.yaml' into software_versions_yaml
 
@@ -531,22 +542,22 @@ process get_software_versions {
     echo "$params.version" &> v_nfcore_exoseq.txt
     echo "$workflow.nextflow.version" &> v_nextflow.txt
     fastqc --version &> v_fastqc.txt
-    cutadapt --version &> v_cutadapt.txt
     trim_galore --version &> v_trim_galore.txt
     samtools --version &> v_samtools.txt
     bwa &> v_bwa.txt 2>&1 || true
-    qualimap --version &> v_qualimap.txt
-    gatk-launch BaseRecalibrator --version &> v_gatk.txt
+    gatk --version &> v_gatk.txt
     multiqc --version &> v_multiqc.txt
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
 
-/**
-* Step 10 - Generate MultiQC config file
-*
+/*
+
+Step 10 - Generate MultiQC config file
+
 */
 
+/*
 process GenerateMultiQCconfig {
   publishDir "${params.outdir}/MultiQC/", mode: 'copy'
 
@@ -579,12 +590,13 @@ process GenerateMultiQCconfig {
   echo "- 'gatk'" >> multiqc_config.yaml
   """
 }
-
+*/
 
 /*
 * Step 12 - Collect metrics, stats and other resources with MultiQC in a single call
 */
 
+/*
 process multiqc {
     tag "$name"
     publishDir "${params.outdir}/MultiQC", mode: 'copy'
@@ -595,7 +607,7 @@ process multiqc {
     file ('trimgalore/*') from trimgalore_results.toList()
     file ('gatk_base_recalibration/T*') from gatk_base_recalibration_results.toList()
     file ('gatk_picard_duplicates/*') from markdup_results.toList()
-    file ('qualimap/*') from qualimap_results.toList()
+//    file ('qualimap/*') from qualimap_results.toList()
     file ('software_versions/*') from software_versions_yaml.toList()
 
 
@@ -613,7 +625,7 @@ process multiqc {
     multiqc -f $rtitle $rfilename --config $multiQCconfig .
     """
 }
-
+*/
 
 /*
 ================================================================================
