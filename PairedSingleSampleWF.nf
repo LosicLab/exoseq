@@ -432,40 +432,31 @@ process applyBQSR {
 }
 
 /*
- * Step 7 - Determine quality metrics of mapped BAM files using QualiMap 2
+ * Step 7 - Determine quality metrics of mapped BAM files using Picard
  *
 */
 
-/*
-process qualiMap {
+
+process CollectMultiMetrics {
     tag "${name}"
-    publishDir "${params.outdir}/Qualimap", mode: 'copy'
+    publishDir "${params.outdir}/picard_multimetrics", mode: 'copy'
 
     input:
     set val(name), file(realign_bam), file(realign_bam_ind) from bam_metrics
 
     output:
-    file "${name}" into qualimap_results
-    file '.command.log' into qualimap_stdout
+    file "${name}.multimetrics.*" into picard_multimetrics
+    file '.command.log' into qc_stdout
 
     script:
-    gcref = ''
-    gff = ''
-    if(params.genome == 'GRCh37') gcref = '-gd HUMAN'
-    if(params.genome == 'GRCm38') gcref = '-gd MOUSE'
-    if(params.exome) gff ="-gff ${params.target_bed}"
     """
-    qualimap bamqc $gcref \\
-    -bam $realign_bam \\
-    -outdir ${name} \\
-    --skip-duplicated \\
-    --collect-overlap-pairs \\
-    -nt ${task.cpus} \\
-    $gff \\
-    --java-mem-size=${task.memory.toGiga()}G \\
+    java -Xmx${task.memory.toGiga()}g -jar $PICARD CollectMultipleMetrics \\
+      I=$realign_bam \\
+      O=${name}.multimetrics \\
+      R=$params.gfasta \\
     """
 }
-*/
+
 
 /*
  * Step 8 - Call Variants with HaplotypeCaller in GVCF mode (differentiate between exome and whole genome data here)
@@ -503,7 +494,7 @@ process variantCall {
         --verbosity INFO \\
         --java-options -Xmx${task.memory.toGiga()}g
     """
-    } else { //We have a winner (genome)
+    } else { // We have a winner (genome)
     """
     gatk HaplotypeCaller \\
         -I $realign_bam \\
@@ -524,108 +515,179 @@ process variantCall {
     }
 }
 
-
 /*
-* Step 9 - Generate a YAML file for software versions in the pipeline
-* This is then parsed by MultiQC and the report feature to produce a final report with the software Versions in the pipeline.
-*/
+ * Step 9 - Annotate gVCFs using GATK VariantAnnotator
+ * 
+*/ 
 
-
-/*
-process get_software_versions {
-    
-    output:
-    file 'software_versions_mqc.yaml' into software_versions_yaml
-
-    script:
-    """
-    echo "$params.version" &> v_nfcore_exoseq.txt
-    echo "$workflow.nextflow.version" &> v_nextflow.txt
-    fastqc --version &> v_fastqc.txt
-    trim_galore --version &> v_trim_galore.txt
-    samtools --version &> v_samtools.txt
-    bwa &> v_bwa.txt 2>&1 || true
-    gatk --version &> v_gatk.txt
-    multiqc --version &> v_multiqc.txt
-    scrape_software_versions.py &> software_versions_mqc.yaml
-    """
-}
-
-/*
-
-Step 10 - Generate MultiQC config file
-
-*/
-
-/*
-process GenerateMultiQCconfig {
-  publishDir "${params.outdir}/MultiQC/", mode: 'copy'
-
-  input:
-
-  output:
-  file("multiqc_config.yaml") into multiQCconfig
-
-  script:
-  """
-  touch multiqc_config.yaml
-  echo "custom_logo_title: 'Exome Analysis Workflow'" >> multiqc_config.yaml
-  echo "extra_fn_clean_exts:" >> multiqc_config.yaml
-  echo "- _R1" >> multiqc_config.yaml
-  echo "- _R2" >> multiqc_config.yaml
-  echo "report_header_info:" >> multiqc_config.yaml
-  echo "- Exoseq version: ${params.version}" >> multiqc_config.yaml
-  echo "- Command Line: ${workflow.commandLine}" >> multiqc_config.yaml
-  echo "- Directory: ${workflow.launchDir}" >> multiqc_config.yaml
-  echo "- Genome: "${params.gfasta} >> multiqc_config.yaml
-  echo "  dbSNP : ${params.dbsnp}" >> multiqc_config.yaml
-  echo "  Omni: ${params.omni}" >> multiqc_config.yaml
-  echo "  Mills: ${params.mills}" >> multiqc_config.yaml
-  echo "top_modules:" >> multiqc_config.yaml
-  echo "- 'fastqc'" >> multiqc_config.yaml
-  echo "- 'cutadapt'" >> multiqc_config.yaml
-  echo "- 'bwa'" >> multiqc_config.yaml
-  echo "- 'samtools'" >> multiqc_config.yaml
-  echo "- 'qualimap'" >> multiqc_config.yaml
-  echo "- 'gatk'" >> multiqc_config.yaml
-  """
-}
-*/
-
-/*
-* Step 12 - Collect metrics, stats and other resources with MultiQC in a single call
-*/
-
-/*
-process multiqc {
-    tag "$name"
-    publishDir "${params.outdir}/MultiQC", mode: 'copy'
+process annotateVariants {
+    tag "${name}"
+    publishDir "${params.outdir}/GATK_VariantAnnotation", mode: 'copy', 
+ //   saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
 
     input:
-    file multiQCconfig
-    file (fastqc:'fastqc/*') from fastqc_results.toList()
-    file ('trimgalore/*') from trimgalore_results.toList()
-    file ('gatk_base_recalibration/T*') from gatk_base_recalibration_results.toList()
-    file ('gatk_picard_duplicates/*') from markdup_results.toList()
-//    file ('qualimap/*') from qualimap_results.toList()
-    file ('software_versions/*') from software_versions_yaml.toList()
-
+    set val(name), file(raw_vcf), file(raw_vcf_idx) from raw_variants
 
     output:
-    file '*multiqc_report.html' into multiqc_report
-    file '*_data' into multiqc_data
-    file '.command.err' into multiqc_stderr
-    val prefix into multiqc_prefix
+    set val(name), file("${name}_annotated_variants.vcf"), file("${name}_annodated_variants.vcf.idx") into ann_raw_variants
+
+
+// TODO !!
+    script:
+    """
+    
+    
+    
+    """
+
+
+}
+
+
+
+/*
+ * Step 10 - Create separate files for SNPs and Indels 
+ * 
+*/ 
+
+process variantSelect {
+    tag "${name}"
+    publishDir "${params.outdir}/GATK_VariantSelection", mode: 'copy', 
+    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
+
+    input:
+    set val(name), file(ann_raw_vcf), file(ann_raw_vcf_idx) from ann_raw_variants
+
+    output:
+    set val(name), file("${name}_snp.vcf"), file("${name}_snp.vcf.idx") into raw_snp
+    set val(name), file("${name}_indels.vcf"), file("${name}_indels.vcf.idx") into raw_indels
 
     script:
-    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
-    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
-    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
     """
-    multiqc -f $rtitle $rfilename --config $multiQCconfig .
+    gatk SelectVariants \\
+        -R $params.gfasta \\
+        --variant $raw_vcf \\
+        --output ${name}_snp.vcf \\
+        --select-type-to-include SNP \\
+        --java-options -Xmx${task.memory.toGiga()}g
+
+    gatk SelectVariants \\
+        -R $params.gfasta \\
+        --variant $raw_vcf \\
+        --output ${name}_indels.vcf \\
+        --select-type-to-include INDEL \\
+        --select-type-to-include MIXED \\
+        --select-type-to-include MNP \\
+        --select-type-to-include SYMBOLIC \\
+        --select-type-to-include NO_VARIATION \\
+        --java-options -Xmx${task.memory.toGiga()}g
     """
 }
-*/
+
+
+
+/*
+ * Step 11 - Recalibrate SNPs using Omni, 1000G and DBSNP databases 
+ * 
+*/ 
+
+process recalSNPs {
+    tag "${name}"
+    publishDir "${params.outdir}/GATK_RecalibrateSNPs/", mode: 'copy', 
+    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
+
+    input:
+    set val(name), file(raw_snp), file(raw_snp_idx) from raw_snp
+
+    output:
+    set val(name), file("${sample}_filtered_snp.vcf"), file("${sample}_filtered_snp.vcf.idx") into filtered_snp
+
+    script:
+    """
+    gatk VariantRecalibrator \\
+        -R $params.gfasta \\
+        --variant $raw_snp \\
+        --output ${name}_snp.recal \\
+        --max-gaussians 4 \\
+        --tranches-file ${name}_snp.tranches \\
+        --resource omni,known=false,training=true,truth=true,prior=12.0:$params.omni \\
+        --resource 1000G,known=false,training=true,truth=false,prior=10.0:$params.thousandg \\
+        --resource dbsnp,known=true,training=false,truth=false,prior=2.0:$params.dbsnp \\
+        --mode SNP \\
+        -an QD \\
+        -an FS \\
+        -an MQ \\
+        --java-options -Xmx${task.memory.toGiga()}g
+
+    gatk ApplyVQSR \\
+        -R $params.gfasta \\
+        --output ${name}_filtered_snp.vcf \\
+        --variant $raw_snp \\
+        --mode SNP \\
+        --tranches-file ${name}_snp.tranches \\
+        --recal-file ${name}_snp.recal \\
+        --truth-sensitivity-filter-level 99.0 \\
+        -mode SNP \\
+        --java-options -Xmx${task.memory.toGiga()}g
+    """
+}
+
+
+/*
+ * Step 12 - Recalibrate INDELS using the Mills golden dataset 
+ * 
+*/ 
+
+process recalIndels {
+    tag "${name}"
+    publishDir "${params.outdir}/GATK_RecalibrateIndels", mode: 'copy', 
+    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
+
+    input:
+    set val(name), file(raw_indel), file(raw_indel_idx) from raw_indels
+
+    output:
+    set val(name), file("${name}_filtered_indels.vcf"), file("${name}_filtered_indels.vcf.idx") into filtered_indels
+
+    script:
+    """
+    gatk VariantRecalibrator \\
+        -R $params.gfasta \\
+        --variant $raw_indel \\
+        --output ${name}_indel.recal \\
+        --max-gaussians 4 \\
+        --tranches-file ${name}_indel.tranches \\
+        --resource mills,known=false,training=true,truth=true,prior=12.0:$params.mills \\
+        --resource dbsnp,known=true,training=false,truth=false,prior=2.0:$params.dbsnp \\
+        -an QD -an DP -an FS -an SOR \\
+        -mode INDEL \\
+        --java-options -Xmx${task.memory.toGiga()}g
+
+    gatk ApplyVQSR \\
+        -R $params.gfasta \\
+        --output ${name}_filtered_indels.vcf \\
+        --variant $raw_indel \\
+        --mode SNP \\
+        --tranches-file ${name}_indel.tranches \\
+        --recal-file ${name}_indel.recal \\
+        --truth-sensitivity-filter-level 99.0 \\
+        -mode INDEL \\
+        --java-options -Xmx${task.memory.toGiga()}g
+    """
+}
+
+/*
+ * Step 13 - Combine recalibrated files again
+ * 
+*/ 
+
+filtered_snp
+    .cross(filtered_indels)
+    .map{ it -> [it[0][0], it[0][1], it[0][2], it[1][1], it[1][2]] }
+    .set{ variants_filtered }
+
+
+
 
 /*
 ================================================================================

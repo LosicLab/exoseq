@@ -14,7 +14,9 @@ regexes = {
     'Qualimap': ['v_qualimap.txt', r"QualiMap v.(\S+)"],
     'GATK': ['v_gatk.txt', r"Version:([\d\.]+)"],
     'MultiQC': ['v_multiqc.txt', r"multiqc, version (\S+)"],
+    'Picard': ['v_picard.txt', r"Version:([\d\.]+)"]
 }
+
 results = OrderedDict()
 results['nf-core/exoseq'] = '<span style="color:#999999;\">N/A</span>'
 results['Nextflow'] = '<span style="color:#999999;\">N/A</span>'
@@ -26,6 +28,7 @@ results['BWA'] = '<span style="color:#999999;\">N/A</span>'
 results['Qualimap'] = '<span style="color:#999999;\">N/A</span>'
 results['GATK'] = '<span style="color:#999999;\">N/A</span>'
 results['MultiQC'] = '<span style="color:#999999;\">N/A</span>'
+results['Picard'] = '<span style="color:#999999;\">N/A</span>'
 
 # Search each file using its regex
 for k, v in regexes.items():
@@ -36,7 +39,7 @@ for k, v in regexes.items():
             results[k] = "v{}".format(match.group(1))
 
 # Remove empty keys (defining them above ensures correct order)
-for k in ['FastQC', 'Cutadapt', 'Trim Galore!', 'Samtools', 'BWA', 'Qualimap', 'GATK']:
+for k in ['FastQC', 'Cutadapt', 'Trim Galore!', 'Samtools', 'BWA', 'Qualimap', 'GATK', 'MultiQC', 'Picard']:
     if results[k] == '<span style="color:#999999;\">N/A</span>':
         del(results[k])
 
@@ -50,6 +53,8 @@ description: 'are collected at run time from the software output.'
 data: |
     <dl class="dl-horizontal">
 ''')
+
 for k,v in results.items():
     print("        <dt>{}</dt><dd>{}</dd>".format(k,v))
+
 print ("    </dl>")
