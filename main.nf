@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow
-/*
 
+
+/*
 ========================================================================================
                nf-core/ E X O S E Q    B E S T    P R A C T I C E
 ========================================================================================
@@ -36,7 +37,7 @@ given. The available paramaters are listed below based on category
 
 Required parameters:
     --reads                       Absolute path to project directory
-    --genome                      Name of iGenomes reference
+    --genome                      Name of Genome reference, [Default: 'GRCh38']
 
 Output:
     --outdir                      Path where the results to be saved [Default: './results']
@@ -60,15 +61,34 @@ params.help = false
 params.reads = false
 params.singleEnd = false
 params.run_id = false
-//params.aligner = 'bwa' //Default, but stay tuned for later ;-)
+params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
 params.exome = true
-
 
 // Output configuration
 params.outdir = './results'
 params.saveAlignedIntermediates = false
 params.saveIntermediateVariants = false
+
+
+
+// Kit options
+params.bait = params.refs[ params.genome ] ? params.refs[ params.genome ].bait ?: false : false
+params.target = params.refs[ params.genome ] ? params.refs[ params.genome ].target ?: false : false
+params.target_bed = params.refs[ params.genome ] ? params.refs[ params.genome ].target_bed ?: false : false
+
+// Reference Genome & Annotations
+params.gfasta = params.refs[ params.genome ] ? params.refs[ params.genome ].gfasta ?: false : false
+params.bwa_index = params.refs[ params.genome ] ? params.refs[ params.genome ].bwa_index ?: false : false
+params.dbsnp = params.refs[ params.genome ] ? params.refs[ params.genome ].dbsnp ?: false : false
+params.thousandg = params.refs[ params.genome ] ? params.refs[ params.genome ].thousandg ?: false : false
+params.mills = params.refs[ params.genome ] ? params.refs[ params.genome ].mills ?: false : false
+params.omni = params.refs[ params.genome ] ? params.refs[ params.genome ].omni ?: false : false
+params.hapmap = params.refs[ params.genome ] ? params.refs[ params.genome ].hapmap ?: false : false
+params.snpeff = params.refs[ params.genome ] ? params.refs[ params.genome ].snpeff ?: false : false
+params.vep = params.refs[ params.genome ] ? params.refs[ params.genome ].vep ?: false : false
+params.bed12 = params.refs[ params.genome ] ? params.refs[ params.genome ].bed12 ?: false : false
+
 
 
 // Clipping options
@@ -100,7 +120,7 @@ if (!params.reads || !params.genome){
 if (!params.kitfiles){
     exit 1, "No Exome Capturing Kit specified!"
 }
-if (!params.metafiles){
+if (!params.refs){
     exit 1, "No Exome Metafiles specified!"
 }
 //AWSBatch sanity checking
@@ -356,7 +376,7 @@ process markDuplicates {
  * Step 5 - Recalibrate BAM file with known variants and BaseRecalibrator
  *
 */
-process recal_bam_files {
+process recalibrateBam {
     tag "${name}"
     publishDir "${params.outdir}/GATK_Recalibration", mode: 'copy'
 
@@ -403,7 +423,7 @@ process applyBQSR {
     set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_for_applyBQSR
 
     output:
-    set val(name), file("${name}.bam"), file("${name}.bai") into bam_vcall, bam_metrics
+    set val(name), file("${name}.bam"), file("${name}.bai") into bam_vcall, bam_metrics, bam_vanno
 
     script:
     if(params.exome){
@@ -437,7 +457,7 @@ process applyBQSR {
 */
 
 
-process CollectMultiMetrics {
+process collectMultiMetrics {
     tag "${name}"
     publishDir "${params.outdir}/picard_multimetrics", mode: 'copy'
 
@@ -472,7 +492,7 @@ process variantCall {
     set val(name), file(realign_bam), file(realign_bam_ind) from bam_vcall
 
     output:
-    set val(name), file("${name}_variants.vcf"), file("${name}_variants.vcf.idx") into raw_variants
+    set val(name), file("${name}_variants.vcf"), file("${name}_variants.vcf.idx") into raw_variants_GATK, raw_variants_vep
 
     script:
     if(params.exome){
@@ -516,176 +536,34 @@ process variantCall {
 }
 
 /*
- * Step 9 - Annotate gVCFs using GATK VariantAnnotator
+ * Step 15 - Annotate Variants with VEP
  * 
-*/ 
-
-process annotateVariants {
+*/
+process vepAnnotation {
     tag "${name}"
-    publishDir "${params.outdir}/GATK_VariantAnnotation", mode: 'copy', 
- //   saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
-
-    input:
-    set val(name), file(raw_vcf), file(raw_vcf_idx) from raw_variants
-
-    output:
-    set val(name), file("${name}_annotated_variants.vcf"), file("${name}_annodated_variants.vcf.idx") into ann_raw_variants
-
-
-// TODO !!
-    script:
-    """
-    
-    
-    
-    """
-
-
-}
-
-
-
-/*
- * Step 10 - Create separate files for SNPs and Indels 
- * 
-*/ 
-
-process variantSelect {
-    tag "${name}"
-    publishDir "${params.outdir}/GATK_VariantSelection", mode: 'copy', 
+    publishDir "${params.outdir}/VEP_AnnotatedVariants/", mode: 'copy', 
     saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
 
     input:
-    set val(name), file(ann_raw_vcf), file(ann_raw_vcf_idx) from ann_raw_variants
+    set val(name), file(phased_vcf), file(phased_vcf_ind) from raw_variants_vep
 
     output:
-    set val(name), file("${name}_snp.vcf"), file("${name}_snp.vcf.idx") into raw_snp
-    set val(name), file("${name}_indels.vcf"), file("${name}_indels.vcf.idx") into raw_indels
+    set val(name), file("${name}_variants_vep.vcf"), file("${name}_variants_vep.vcf.idx")
+
 
     script:
     """
-    gatk SelectVariants \\
-        -R $params.gfasta \\
-        --variant $raw_vcf \\
-        --output ${name}_snp.vcf \\
-        --select-type-to-include SNP \\
-        --java-options -Xmx${task.memory.toGiga()}g
+        vep \\
+        -i $phased_vcf \\
+        -o ${name}_variants_vep.vcf \\
+        --fork 4 \\
+        --offline \\
+        --cache \\
+        --dir_cache $params.vep \\
+        --everything
 
-    gatk SelectVariants \\
-        -R $params.gfasta \\
-        --variant $raw_vcf \\
-        --output ${name}_indels.vcf \\
-        --select-type-to-include INDEL \\
-        --select-type-to-include MIXED \\
-        --select-type-to-include MNP \\
-        --select-type-to-include SYMBOLIC \\
-        --select-type-to-include NO_VARIATION \\
-        --java-options -Xmx${task.memory.toGiga()}g
     """
 }
-
-
-
-/*
- * Step 11 - Recalibrate SNPs using Omni, 1000G and DBSNP databases 
- * 
-*/ 
-
-process recalSNPs {
-    tag "${name}"
-    publishDir "${params.outdir}/GATK_RecalibrateSNPs/", mode: 'copy', 
-    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
-
-    input:
-    set val(name), file(raw_snp), file(raw_snp_idx) from raw_snp
-
-    output:
-    set val(name), file("${sample}_filtered_snp.vcf"), file("${sample}_filtered_snp.vcf.idx") into filtered_snp
-
-    script:
-    """
-    gatk VariantRecalibrator \\
-        -R $params.gfasta \\
-        --variant $raw_snp \\
-        --output ${name}_snp.recal \\
-        --max-gaussians 4 \\
-        --tranches-file ${name}_snp.tranches \\
-        --resource omni,known=false,training=true,truth=true,prior=12.0:$params.omni \\
-        --resource 1000G,known=false,training=true,truth=false,prior=10.0:$params.thousandg \\
-        --resource dbsnp,known=true,training=false,truth=false,prior=2.0:$params.dbsnp \\
-        --mode SNP \\
-        -an QD \\
-        -an FS \\
-        -an MQ \\
-        --java-options -Xmx${task.memory.toGiga()}g
-
-    gatk ApplyVQSR \\
-        -R $params.gfasta \\
-        --output ${name}_filtered_snp.vcf \\
-        --variant $raw_snp \\
-        --mode SNP \\
-        --tranches-file ${name}_snp.tranches \\
-        --recal-file ${name}_snp.recal \\
-        --truth-sensitivity-filter-level 99.0 \\
-        -mode SNP \\
-        --java-options -Xmx${task.memory.toGiga()}g
-    """
-}
-
-
-/*
- * Step 12 - Recalibrate INDELS using the Mills golden dataset 
- * 
-*/ 
-
-process recalIndels {
-    tag "${name}"
-    publishDir "${params.outdir}/GATK_RecalibrateIndels", mode: 'copy', 
-    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
-
-    input:
-    set val(name), file(raw_indel), file(raw_indel_idx) from raw_indels
-
-    output:
-    set val(name), file("${name}_filtered_indels.vcf"), file("${name}_filtered_indels.vcf.idx") into filtered_indels
-
-    script:
-    """
-    gatk VariantRecalibrator \\
-        -R $params.gfasta \\
-        --variant $raw_indel \\
-        --output ${name}_indel.recal \\
-        --max-gaussians 4 \\
-        --tranches-file ${name}_indel.tranches \\
-        --resource mills,known=false,training=true,truth=true,prior=12.0:$params.mills \\
-        --resource dbsnp,known=true,training=false,truth=false,prior=2.0:$params.dbsnp \\
-        -an QD -an DP -an FS -an SOR \\
-        -mode INDEL \\
-        --java-options -Xmx${task.memory.toGiga()}g
-
-    gatk ApplyVQSR \\
-        -R $params.gfasta \\
-        --output ${name}_filtered_indels.vcf \\
-        --variant $raw_indel \\
-        --mode SNP \\
-        --tranches-file ${name}_indel.tranches \\
-        --recal-file ${name}_indel.recal \\
-        --truth-sensitivity-filter-level 99.0 \\
-        -mode INDEL \\
-        --java-options -Xmx${task.memory.toGiga()}g
-    """
-}
-
-/*
- * Step 13 - Combine recalibrated files again
- * 
-*/ 
-
-filtered_snp
-    .cross(filtered_indels)
-    .map{ it -> [it[0][0], it[0][1], it[0][2], it[1][1], it[1][2]] }
-    .set{ variants_filtered }
-
 
 
 
