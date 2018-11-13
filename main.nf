@@ -59,12 +59,13 @@ documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 params.name = false
 params.help = false
 params.reads = false
+params.genome = 'GRCh38'
 params.singleEnd = false
 params.run_id = false
 params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
 params.exome = true
-
+params.kitfiles = 'agilent_v5'
 // Output configuration
 params.outdir = './results'
 params.saveAlignedIntermediates = false
@@ -556,10 +557,10 @@ process vepAnnotation {
         vep \\
         -i $phased_vcf \\
         -o ${name}_variants_vep.vcf \\
-        --fork 4 \\
+        --fork ${task.cpus} \\
         --offline \\
-        --cache \\
         --dir_cache $params.vep \\
+        --cache_version 94 \\
         --everything
 
     """
