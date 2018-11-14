@@ -87,7 +87,8 @@ params.mills = params.refs[ params.genome ] ? params.refs[ params.genome ].mills
 params.omni = params.refs[ params.genome ] ? params.refs[ params.genome ].omni ?: false : false
 params.hapmap = params.refs[ params.genome ] ? params.refs[ params.genome ].hapmap ?: false : false
 params.snpeff = params.refs[ params.genome ] ? params.refs[ params.genome ].snpeff ?: false : false
-params.vep = params.refs[ params.genome ] ? params.refs[ params.genome ].vep ?: false : false
+params.vep_cache = params.refs[ params.genome ] ? params.refs[ params.genome ].vep_cache ?: false : false
+params.vep_fasta = params.refs[ params.genome ] ? params.refs[ params.genome ].vep_fasta ?: false : false
 params.bed12 = params.refs[ params.genome ] ? params.refs[ params.genome ].bed12 ?: false : false
 
 
@@ -553,14 +554,21 @@ process vepAnnotation {
 
 
     script:
+    
     """
         vep \\
         -i $phased_vcf \\
         -o ${name}_variants_vep.vcf \\
         --fork ${task.cpus} \\
         --offline \\
-        --dir_cache $params.vep \\
+        --cache \\
+        --fasta $params.vep_fasta \\
+        --dir_cache $params.vep_cache \\
         --cache_version 94 \\
+        --force_overwrite \\
+        --no_stats \\
+        --buffer_size 10000 \\
+        --coding_only \\
         --everything
 
     """
