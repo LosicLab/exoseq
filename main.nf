@@ -66,6 +66,9 @@ params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
 params.exome = true
 params.kitfiles = 'agilent_v5'
+params.multiPlex = true
+
+
 // Output configuration
 params.outdir = './results'
 params.saveAlignedIntermediates = false
