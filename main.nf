@@ -249,6 +249,7 @@ if(! params.bwa_index){
  * 
 */
 
+
 process fastqc {
 
     tag "$name"
@@ -544,6 +545,9 @@ process variantCall {
  * Step 15 - Annotate Variants with VEP
  * 
 */
+
+
+/*
 process vepAnnotation {
     tag "${name}"
     publishDir "${params.outdir}/VEP_AnnotatedVariants/", mode: 'copy', 
@@ -576,7 +580,7 @@ process vepAnnotation {
 
     """
 }
-
+*/
 
 
 /*
