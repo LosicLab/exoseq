@@ -66,7 +66,7 @@ params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
 params.exome = true
 params.kitfiles = 'agilent_v5'
-params.multiPlex = true
+
 
 
 // Output configuration
@@ -277,9 +277,9 @@ if(params.notrim){
     trimgalore_results = []
     trimgalore_logs = []
 } else {
-    process trim_galore {
+    process trimmomatic {
         tag "$name"
-        publishDir "${params.outdir}/trim_galore", mode: 'copy', 
+        publishDir "${params.outdir}/trimmomatic", mode: 'copy', 
             saveAs: {filename -> 
                 if (filename.indexOf("_fastqc") > 0) "FastQC/$filename"
                 else if (filename.indexOf("trimming_report.txt") > 0) "logs/$filename"
@@ -289,25 +289,22 @@ if(params.notrim){
         set val(name), file(reads) from read_files_trimming
 
         output:
-        set val(name), file(reads) into trimmed_reads
-        file '*trimming_report.txt' into trimgalore_results, trimgalore_logs
+        set val(name), file("${name}_trimmed_R1.fastq.gz"), file("${name}_trimmed_R2.fastq.gz") into trimmed_reads
+        file '*trimming_report.txt' into trimmomatic_results, trimmomatic_logs
 
 
         script:
-        single = reads instanceof Path
-        c_r1 = params.clip_r1 > 0 ? "--clip_r1 ${params.clip_r1}" : ''
-        c_r2 = params.clip_r2 > 0 ? "--clip_r2 ${params.clip_r2}" : ''
-        tpc_r1 = params.three_prime_clip_r1 > 0 ? "--three_prime_clip_r1 ${params.three_prime_clip_r1}" : ''
-        tpc_r2 = params.three_prime_clip_r2 > 0 ? "--three_prime_clip_r2 ${params.three_prime_clip_r2}" : ''
-        if (params.singleEnd) {
-            """
-            trim_galore --gzip $c_r1 $tpc_r1 $reads --fastqc
-            """
-        } else {
-            """
-            trim_galore --paired --gzip $c_r1 $c_r2 $tpc_r1 $tpc_r2 $reads --fastqc
-            """
-        }
+
+        """
+        java -Xmx${task.memory.toGiga()}g -jar $TRIMMOMATIC PE \\
+        -threads $task.cpus \\
+        -trimlog $name'.trimming_report.txt' \\
+        $reads \\
+        ${name}_trimmed_R1.fastq.gz ${name}_trimmedU_R1.fastq.gz \\
+        ${name}_trimmed_R2.fastq.gz ${name}_trimmedU_R2.fastq.gz \\
+        ILLUMINACLIP:/adapters/all_adapters:2:30:10 LEADING:25 TRAILING:25 SLIDINGWINDOW:5:30 MINLEN:50
+        """
+        
     }
 }
 
@@ -320,7 +317,7 @@ process bwamem {
     tag "$name"
 
     input:
-    set val(name), file(reads) from trimmed_reads
+    set val(name), file("${name}_trimmed_R1.fastq.gz"), file("${name}_trimmed_R2.fastq.gz") from trimmed_reads
     file(bwa_index) from bwa_index
 
     output:
@@ -340,7 +337,6 @@ process bwamem {
     $reads | samtools sort ${avail_mem} -O bam -T - >${name}_bwa.bam
     """
 }
-
 
 /*
 *  STEP 4 - Mark PCR duplicates in sorted BAM file
