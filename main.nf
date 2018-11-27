@@ -30,27 +30,34 @@ helpMessage = """
 nf-core/ExoSeq : Exome/Targeted sequence capture best practice analysis v${params.version}
 ===============================================================================
 
-Usage: nextflow nf-core/ExoSeq --reads '*_R{1,2}.fastq.gz' --genome GRCh37 --kitfiles 'kitpath' --metafiles 'metapath'
+Usage: nextflow </path/to/pipelines/exoseq> --reads '*_R{1,2}.fastq.gz' --genome GRCh37 --sampleID 'sample_name'
 
 This is a typical usage where the required parameters (with no defaults) were
-given. The available paramaters are listed below based on category
+given. It is recommended to process one sample per nextflow run.
+
+The available paramaters are listed below based on category
 
 Required parameters:
-    --reads                       Absolute path to project directory
+    --reads                       Absolute path to input fastq file for sample (MUST use regex '*' in name)
     --genome                      Name of Genome reference, [Default: 'GRCh38']
+    --sampleID                    Name of Sample
+
+Required if running minerva profile:
+    --minerva_account             name of fund for minerva to charge lsf jobs to
+    --job_queue                   job queue to submit to [Default: 'alloc']
 
 Output:
-    --outdir                      Path where the results to be saved [Default: './results']
+    --outdir                      Path where the results to be saved [Default: use sampleID as directory name]
     -w/--work-dir                 The temporary directory where intermediate data will be saved
 
-Kit files:
-    --kitfiles                    Path to kitfiles defined in metafiles.config
-    --metafiles                   Path to metafiles defined in metafiles.config
-    --kit                         Kit used to prep samples [Default: 'agilent_v5']
-
-AWSBatch options:
-    --awsqueue                    The AWSBatch JobQueue that needs to be set when running on AWSBatch
-    --awsregion                   The AWS Region for your AWS Batch job to run on
+Optional Parameters:
+    -profile                      load custom profile ['standard' | 'minerva' ; Default: 'standard']
+    --name                        custom run name?
+    --help                        show help message & exit
+    --singleEnd                   input reads are single-end [Default: paired-end]
+    --multiLane                   specify if you have mutliple lanes per sample that need to be concatenated. [Default: true]
+    --saveAlignedIntermediates    [Default: false]
+    --saveIntermediateVariants    [Default: false]
 
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
@@ -66,42 +73,14 @@ params.saveReference = true
 params.exome = true
 params.kitfiles = 'agilent_v5'
 params.sampleID = 'sampleID'
-params.muliLane = true
+params.multiLane = true
+params.aligner = "bwa"
 
 // Output configuration
 params.outdir = "./${params.sampleID}"
 params.saveAlignedIntermediates = false
 params.saveIntermediateVariants = false
 
-
-
-// Kit options
-params.bait = params.refs[ params.genome ] ? params.refs[ params.genome ].bait ?: false : false
-params.target = params.refs[ params.genome ] ? params.refs[ params.genome ].target ?: false : false
-params.target_bed = params.refs[ params.genome ] ? params.refs[ params.genome ].target_bed ?: false : false
-
-// Reference Genome & Annotations
-params.gfasta = params.refs[ params.genome ] ? params.refs[ params.genome ].gfasta ?: false : false
-params.bwa_index = params.refs[ params.genome ] ? params.refs[ params.genome ].bwa_index ?: false : false
-params.dbsnp = params.refs[ params.genome ] ? params.refs[ params.genome ].dbsnp ?: false : false
-params.thousandg = params.refs[ params.genome ] ? params.refs[ params.genome ].thousandg ?: false : false
-params.mills = params.refs[ params.genome ] ? params.refs[ params.genome ].mills ?: false : false
-params.omni = params.refs[ params.genome ] ? params.refs[ params.genome ].omni ?: false : false
-params.hapmap = params.refs[ params.genome ] ? params.refs[ params.genome ].hapmap ?: false : false
-params.snpeff = params.refs[ params.genome ] ? params.refs[ params.genome ].snpeff ?: false : false
-params.vep_cache = params.refs[ params.genome ] ? params.refs[ params.genome ].vep_cache ?: false : false
-params.vep_fasta = params.refs[ params.genome ] ? params.refs[ params.genome ].vep_fasta ?: false : false
-params.bed12 = params.refs[ params.genome ] ? params.refs[ params.genome ].bed12 ?: false : false
-
-
-
-// Clipping options
-params.notrim = false
-params.saveTrimmed = false
-params.clip_r1 = 0
-params.clip_r2 = 0
-params.three_prime_clip_r1 = 0
-params.three_prime_clip_r2 = 0
 
 
 // Has the run name been specified by the user?
@@ -121,20 +100,16 @@ if (params.help){
 if (!params.reads || !params.genome){
     exit 1, "Parameters '--reads' and '--genome' are required to run the pipeline"
 }
-if (!params.kitfiles){
-    exit 1, "No Exome Capturing Kit specified!"
-}
+
 if (!params.refs){
     exit 1, "No Exome Metafiles specified!"
 }
-//AWSBatch sanity checking
-if(workflow.profile == 'awsbatch'){
-    if (!params.awsqueue || !params.awsregion) exit 1, "Specify correct --awsqueue and --awsregion parameters on AWSBatch!"
-    if (!workflow.workDir.startsWith('s3') || !params.outdir.startsWith('s3')) exit 1, "Specify S3 URLs for workDir and outdir parameters on AWSBatch!"
+if (!params.sampleID){
+    exit 1, "No sample ID specified!"
 }
 
-// Create a channel for input files
 
+// Create a channel for input files
 Channel
     .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
@@ -192,6 +167,61 @@ try {
               "  Please run `nextflow self-update` to update Nextflow.\n" +
               "============================================================"
 }
+
+
+
+
+// Build BWA Index if this is required
+
+if(! params.bwa_index){
+    // Create Channels
+    fasta_for_bwa_index = Channel
+        .fromPath("${params.gfasta}")
+    fasta_for_samtools_index = Channel
+        .fromPath("${params.gfasta}")
+    // Create a BWA index for non-indexed genomes
+    process makeBWAIndex {
+
+
+        tag "$params.gfasta"
+        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
+                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
+
+        input:
+        file fasta from fasta_for_bwa_index
+
+        output:
+        file "*.{amb,ann,bwt,pac,sa}" into bwa_index
+
+        script:
+        """
+        bwa index $fasta
+        """
+    }
+    // Create a FastA index for non-indexed genomes
+    process makeFastaIndex {
+
+        tag "$params.gfasta"
+        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
+                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
+
+        input:
+        file fasta from fasta_for_samtools_index
+
+        output:
+        file "*.fai" into samtools_index
+
+        script:
+        """
+        samtools faidx $fasta
+        """
+    }
+} else {
+    bwa_index = file("${params.bwa_index}")
+}
+
+
+
 
 /*
  * 
@@ -276,9 +306,8 @@ process bwamem {
     set val(name), file("${name}_bwa.bam") into mappedBam
     file '.command.log' into bwa_stdout
 
--m ${avail_mem} -O bam -T - >
--m ${avail_mem} -O bam -T - >
-    def avail_mem = task.memory ? "-m ${task.memory.toMega().intdiv(task.cpus)}M" : ''
+    script:
+    def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
     rg="\'@RG\\tID:${params.run_id}\\tSM:${params.run_id}\\tPL:illumina\'"
 
     """
@@ -286,12 +315,13 @@ process bwamem {
     -R $rg \\
     -t ${task.cpus} \\
     $params.gfasta \\
-    $reads | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - >${name}_bwa.bam
+    $reads | samtools sort -m ${avail_mem} -O bam -T - >${name}_bwa.bam
     """
 }
 
-if{params.mutliLane} {
+if(params.multiLane) {
 
+singleBam = Channel.create()
 groupedBam = Channel.create()
 mappedBam.groupTuple(by:[0,1,2])
   .choice(singleBam, groupedBam) {it[3].size() > 1 ? 1 : 0}
@@ -303,13 +333,14 @@ process MergeBams {
     set val(sampleID), file(bam) from groupedBam
 
   output:
-    set file("${sampleID}.bam") into mergedBam
+    set val(sampleID), file("${sampleID}.bam") into mergedBam
 
   when: step == 'bwamem'
 
   script:
+  def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
   """
-  samtools merge --threads ${task.cpus} ${bam} | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - > ${sampleID}_bwa.bam
+  samtools merge -@ ${task.cpus} -m ${task.memory} ${bam} | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - > ${sampleID}_bwa.bam
   """
 }
 
