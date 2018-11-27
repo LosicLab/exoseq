@@ -62,15 +62,14 @@ params.reads = false
 params.genome = 'GRCh38'
 params.singleEnd = false
 params.run_id = false
-params.aligner = 'bwa' //Default, but stay tuned for later ;-)
 params.saveReference = true
 params.exome = true
 params.kitfiles = 'agilent_v5'
-
-
+params.sampleID = 'sampleID'
+params.muliLane = true
 
 // Output configuration
-params.outdir = './results'
+params.outdir = "./${params.sampleID}"
 params.saveAlignedIntermediates = false
 params.saveIntermediateVariants = false
 
@@ -194,55 +193,6 @@ try {
               "============================================================"
 }
 
-// Build BWA Index if this is required
-
-if(! params.bwa_index){
-    // Create Channels
-    fasta_for_bwa_index = Channel
-        .fromPath("${params.gfasta}")
-    fasta_for_samtools_index = Channel
-        .fromPath("${params.gfasta}")
-    // Create a BWA index for non-indexed genomes
-    process makeBWAIndex {
-
-
-        tag "$params.gfasta"
-        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
-                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
-
-        input:
-        file fasta from fasta_for_bwa_index
-
-        output:
-        file "*.{amb,ann,bwt,pac,sa}" into bwa_index
-
-        script:
-        """
-        bwa index $fasta
-        """
-    }
-    // Create a FastA index for non-indexed genomes
-    process makeFastaIndex {
-
-        tag "$params.gfasta"
-        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
-                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
-
-        input:
-        file fasta from fasta_for_samtools_index
-
-        output:
-        file "*.fai" into samtools_index
-
-        script:
-        """
-        samtools faidx $fasta
-        """
-    }
-} else {
-    bwa_index = file("${params.bwa_index}")
-}
-
 /*
  * 
  * STEP 0 - FastQC 
@@ -277,9 +227,9 @@ if(params.notrim){
     trimgalore_results = []
     trimgalore_logs = []
 } else {
-    process trimmomatic {
+    process trim_galore {
         tag "$name"
-        publishDir "${params.outdir}/trimmomatic", mode: 'copy', 
+        publishDir "${params.outdir}/trim_galore", mode: 'copy', 
             saveAs: {filename -> 
                 if (filename.indexOf("_fastqc") > 0) "FastQC/$filename"
                 else if (filename.indexOf("trimming_report.txt") > 0) "logs/$filename"
@@ -289,25 +239,27 @@ if(params.notrim){
         set val(name), file(reads) from read_files_trimming
 
         output:
-        set val(name), file("${name}_trimmed_R1.fastq.gz"), file("${name}_trimmed_R2.fastq.gz") into trimmed_reads
-        file '*trimming_report.txt' into trimmomatic_results, trimmomatic_logs
+        set val(name), file(reads) into trimmed_reads
+        file '*trimming_report.txt' into trimgalore_results, trimgalore_logs
 
 
         script:
-
-        """
-        java -Xmx${task.memory.toGiga()}g -jar $TRIMMOMATIC PE \\
-        -threads $task.cpus \\
-        -trimlog $name'.trimming_report.txt' \\
-        $reads \\
-        ${name}_trimmed_R1.fastq.gz ${name}_trimmedU_R1.fastq.gz \\
-        ${name}_trimmed_R2.fastq.gz ${name}_trimmedU_R2.fastq.gz \\
-        ILLUMINACLIP:/adapters/all_adapters:2:30:10 LEADING:25 TRAILING:25 SLIDINGWINDOW:5:30 MINLEN:50
-        """
-        
+        single = reads instanceof Path
+        c_r1 = params.clip_r1 > 0 ? "--clip_r1 ${params.clip_r1}" : ''
+        c_r2 = params.clip_r2 > 0 ? "--clip_r2 ${params.clip_r2}" : ''
+        tpc_r1 = params.three_prime_clip_r1 > 0 ? "--three_prime_clip_r1 ${params.three_prime_clip_r1}" : ''
+        tpc_r2 = params.three_prime_clip_r2 > 0 ? "--three_prime_clip_r2 ${params.three_prime_clip_r2}" : ''
+        if (params.singleEnd) {
+            """
+            trim_galore --gzip $c_r1 $tpc_r1 $reads --fastqc
+            """
+        } else {
+            """
+            trim_galore --paired --gzip $c_r1 $c_r2 $tpc_r1 $tpc_r2 $reads --fastqc
+            """
+        }
     }
 }
-
 
 /*
  * STEP 2 - Map with BWA Mem
@@ -317,15 +269,15 @@ process bwamem {
     tag "$name"
 
     input:
-    set val(name), file("${name}_trimmed_R1.fastq.gz"), file("${name}_trimmed_R2.fastq.gz") from trimmed_reads
+    set val(name), file(reads) from trimmed_reads
     file(bwa_index) from bwa_index
 
     output:
-    set val(name), file("${name}_bwa.bam") into samples_sorted_bam
+    set val(name), file("${name}_bwa.bam") into mappedBam
     file '.command.log' into bwa_stdout
 
-
-    script:
+-m ${avail_mem} -O bam -T - >
+-m ${avail_mem} -O bam -T - >
     def avail_mem = task.memory ? "-m ${task.memory.toMega().intdiv(task.cpus)}M" : ''
     rg="\'@RG\\tID:${params.run_id}\\tSM:${params.run_id}\\tPL:illumina\'"
 
@@ -334,9 +286,38 @@ process bwamem {
     -R $rg \\
     -t ${task.cpus} \\
     $params.gfasta \\
-    $reads | samtools sort ${avail_mem} -O bam -T - >${name}_bwa.bam
+    $reads | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - >${name}_bwa.bam
     """
 }
+
+if{params.mutliLane} {
+
+groupedBam = Channel.create()
+mappedBam.groupTuple(by:[0,1,2])
+  .choice(singleBam, groupedBam) {it[3].size() > 1 ? 1 : 0}
+
+process MergeBams {
+  tag "${sampleID}"
+
+  input:
+    set val(sampleID), file(bam) from groupedBam
+
+  output:
+    set file("${sampleID}.bam") into mergedBam
+
+  when: step == 'bwamem'
+
+  script:
+  """
+  samtools merge --threads ${task.cpus} ${bam} | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - > ${sampleID}_bwa.bam
+  """
+}
+
+} else{
+mergedBam = mappedBam
+}
+
+
 
 /*
 *  STEP 4 - Mark PCR duplicates in sorted BAM file
@@ -349,7 +330,7 @@ process markDuplicates {
         saveAs: { filename -> filename.indexOf(".dup_metrics") > 0 ? filename : null }
 
     input:
-    set val(name), file(sorted_bam) from samples_sorted_bam
+    set val(name), file(sorted_bam) from mergedBam
 
     output:
     set val(name), file("${name}_markdup.bam"), file("${name}_markdup.bai") into samples_markdup_bam, samples_for_applyBQSR
