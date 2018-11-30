@@ -38,7 +38,7 @@ given. It is recommended to process one sample per nextflow run.
 The available paramaters are listed below based on category
 
 Required parameters:
-    --bam                         Absolute path to input bam file for sample (MUST use regex '*' in name)
+    --nbam                        Absolute path to NORMAL input bam file for sample (MUST use regex '*' in name)
     --genome                      Name of Genome reference, [Default: 'GRCh38']
 
 Required if running minerva profile:
@@ -54,6 +54,9 @@ Optional Parameters:
     --name                        custom run name?
     --help                        show help message & exit
     --singleEnd                   input reads are single-end [Default: paired-end]
+    --tbam                        Absolute path to TUMOR input bam file for sample (MUST use regex '*' in name)
+                                  Using this will make the pipeline call somatic mutations
+
 
     --saveAlignedIntermediates    [Default: false]
     --saveIntermediateVariants    [Default: false]
@@ -61,24 +64,30 @@ Optional Parameters:
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
-
-
+params.nbam = false
+params.tbam = false
 // Output configuration
 params.outdir = "./variantCall"
 params.saveIntermediateVariants = false
 
 
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.bam || !params.genome){
+if (!params.nbam || !params.genome){
     exit 1, "Parameters '--bam' and '--genome' are required to run the pipeline"
 }
 
 
 // Create a channel for input files
-inputBam = Channel
-    .fromFilePairs(params.bam, size: 1)
-    .ifEmpty { exit 1, "Cannot find any bams matching: ${params.bam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
-
+Channel
+    .fromFilePairs(params.nbam, size: 1)
+    .ifEmpty { exit 1, "Cannot find any bams matching: ${params.nbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
+    .into(normalBAM_hc, normalBAM_mutect)
+if(params.tbam) {
+    Channel
+    .fromFilePairs(params.tbam, size: 1)
+    .ifEmpty { exit 1, "Cannot find any bams matching: ${params.tbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
+    .into(tumorBAM_hc, tumorBAM_mutect)
+    }
 
 // Show help when needed
 if (params.help){
@@ -148,8 +157,117 @@ try {
 }
 
 
+process callSNPs {
+    tag "${name}"
+    publishDir "${params.outdir}/snpCalls/", mode: 'symlink'
+    
+    if(!params.tbam){
+        input:
+        set val(name), file(normal_bam), file(normal_bai) from normalBAM_hc
+        
+
+        output:
+        set val(name), file("${name}_raw_snps.vcf"), file("${name}_raw_snps.vcf.idx") into nVCF_bqsr, nVCF_results
+
+        script:
+        """
+        gatk HaplotypeCaller \\
+            -I $normal_bam \\
+            -R $params.gfasta \\
+            -O ${name}_raw_snps.vcf \\
+            -ERC GVCF \\
+            -L $params.target \\
+            --create-output-variant-index \\
+            --annotation MappingQualityRankSumTest \\
+            --annotation QualByDepth \\
+            --annotation ReadPosRankSumTest \\
+            --annotation RMSMappingQuality \\
+            --annotation FisherStrand \\
+            --annotation Coverage \\
+            --dbsnp $params.dbsnp \\
+            --verbosity INFO \\
+            --java-options -Xmx${task.memory.toGiga()}g
+        """
+
+    } else{
+        input:
+        set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_hc
+        set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_hc
+        
+        output:
+        set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
+        set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
+
+        script:
+        """
+        gatk HaplotypeCaller \\
+            -I $normal_bam \\
+            -R $params.gfasta \\
+            -O ${normalID}_rawsnps.vcf \\
+            -ERC GVCF \\
+            -L $params.target \\
+            --create-output-variant-index \\
+            --annotation MappingQualityRankSumTest \\
+            --annotation QualByDepth \\
+            --annotation ReadPosRankSumTest \\
+            --annotation RMSMappingQuality \\
+            --annotation FisherStrand \\
+            --annotation Coverage \\
+            --dbsnp $params.dbsnp \\
+            --verbosity INFO \\
+            --java-options -Xmx${task.memory.toGiga()}g
+        
+        gatk HaplotypeCaller \\
+            -I $tumor_bam \\
+            -R $params.gfasta \\
+            -O ${tumorID}_rawsnps.vcf \\
+            -ERC GVCF \\
+            -L $params.target \\
+            --create-output-variant-index \\
+            --annotation MappingQualityRankSumTest \\
+            --annotation QualByDepth \\
+            --annotation ReadPosRankSumTest \\
+            --annotation RMSMappingQuality \\
+            --annotation FisherStrand \\
+            --annotation Coverage \\
+            --dbsnp $params.dbsnp \\
+            --verbosity INFO \\
+            --java-options -Xmx${task.memory.toGiga()}g
+
+            """
+    }
+}
 
 
+
+if(params.tbam) {
+    // This will give as a list of unfiltered calls for MuTect2.
+    process callSomaticVariants {
+    tag {normalID + "-vs-" + tumorID}
+    publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'symlink'
+
+    input:
+        set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_mutect
+        set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_mutect
+
+    output:
+        set val("mutect2"), tumorID, normalID, file( "${tumorID}_vs_${normalID}.vcf") into mutect2Output
+
+
+    script:
+    """
+        gatk --java-options "-Xmx${task.memory.toGiga()}g" \
+            Mutect2 \
+            -R ${params.gfasta} \
+            -I ${tumor_bam}  -tumor ${tumorID} \
+            -I ${normal_bam} -normal ${normalID} \
+            -L ${params.target} \
+            -O ${tumorID}_vs_${normalID}.vcf
+    """
+    }
+
+
+}
 
 
 /*
