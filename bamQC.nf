@@ -38,9 +38,10 @@ given. It is recommended to process one sample per nextflow run.
 The available paramaters are listed below based on category
 
 Required parameters:
-    --reads                       Absolute path to input fastq file for sample (MUST use regex '*' in name)
+    --bam                       Absolute path to input fastq file for sample (MUST use regex '*' in name)
     --genome                      Name of Genome reference, [Default: 'GRCh38']
     --sampleID                    Name of Sample
+    --multiLane                   specify if you have mutliple lanes per sample that need to be concatenated. Assumes 4 lanes [Default: false]
 
 Required if running minerva profile:
     --minerva_account             name of fund for minerva to charge lsf jobs to
@@ -55,7 +56,7 @@ Optional Parameters:
     --name                        custom run name?
     --help                        show help message & exit
     --singleEnd                   input reads are single-end [Default: paired-end]
-    --multiLane                   specify if you have mutliple lanes per sample that need to be concatenated. [Default: true]
+
     --saveAlignedIntermediates    [Default: false]
     --saveIntermediateVariants    [Default: false]
 
@@ -65,7 +66,7 @@ documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 // Variables and defaults
 params.name = false
 params.help = false
-params.reads = false
+params.bam = false
 params.genome = 'GRCh38'
 params.singleEnd = false
 params.run_id = false
@@ -73,11 +74,11 @@ params.saveReference = true
 params.exome = true
 params.kitfiles = 'agilent_v5'
 params.sampleID = 'sampleID'
-params.multiLane = true
+params.multiLane = false
 params.aligner = "bwa"
 
 // Output configuration
-params.outdir = "./${params.sampleID}"
+params.outdir = "./variantcall"
 params.saveAlignedIntermediates = false
 params.saveIntermediateVariants = false
 
@@ -97,23 +98,21 @@ if (params.help){
 }
 
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.reads || !params.genome){
-    exit 1, "Parameters '--reads' and '--genome' are required to run the pipeline"
+if (!params.bam || !params.genome){
+    exit 1, "Parameters '--bam' and '--genome' are required to run the pipeline"
 }
 
 if (!params.refs){
     exit 1, "No Exome Metafiles specified!"
 }
-if (!params.sampleID){
-    exit 1, "No sample ID specified!"
-}
+
 
 
 // Create a channel for input files
-Channel
-    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
-    .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .into { read_files_fastqc; read_files_trimming }
+inputBam = Channel
+    .fromFilePairs(params.bam, size: params.multiLane ? 4 : 1)
+    .ifEmpty { exit 1, "Cannot find any or enough bams matching: ${params.bam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
+
 
 
 // Validate Input indices for BWA Mem and GATK
@@ -146,7 +145,6 @@ summary['Max CPUs']       = params.max_cpus
 summary['Max Time']       = params.max_time
 summary['Output dir']     = params.outdir
 summary['Working dir']    = workflow.workDir
-summary['Container']      = workflow.container
 if(workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Current home']   = "$HOME"
 summary['Current user']   = "$USER"
@@ -169,211 +167,55 @@ try {
 }
 
 
+if(! params.multiLane){
+    mergedBamForMkDup = inputBam
 
+}else{
+    
+    process mergeBamFiles {
+        tag "${name}"
 
-// Build BWA Index if this is required
-
-if(! params.bwa_index){
-    // Create Channels
-    fasta_for_bwa_index = Channel
-        .fromPath("${params.gfasta}")
-    fasta_for_samtools_index = Channel
-        .fromPath("${params.gfasta}")
-    // Create a BWA index for non-indexed genomes
-    process makeBWAIndex {
-
-
-        tag "$params.gfasta"
-        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
-                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
+        publishDir "${params.outdir}/mergedBamFiles", mode: 'symlink',
+            saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
         input:
-        file fasta from fasta_for_bwa_index
+        set val(name), file(bams) from inputBam
 
         output:
-        file "*.{amb,ann,bwt,pac,sa}" into bwa_index
+        set val(name), file("${name}_merged.sorted.bam"), file("${name}_merged.sorted.bai") into mergedBamResults, mergedBamForMkDup
 
         script:
+        def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
+
         """
-        bwa index $fasta
+        samtools merge -@ ${task.cpus} ${name}.merged.bam $bams
+        samtools sort ${name}.merged.bam -m ${avail_mem} -@ ${task.cpus} -O bam -T ${name} > ${name}.merged.sorted.bam
+        samtools index -@ ${task.cpus} ${name}.merged.sorted.bam
         """
     }
-    // Create a FastA index for non-indexed genomes
-    process makeFastaIndex {
 
-        tag "$params.gfasta"
-        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
-                   saveAs: { params.saveReference ? it : null }, mode: 'copy'
-
-        input:
-        file fasta from fasta_for_samtools_index
-
-        output:
-        file "*.fai" into samtools_index
-
-        script:
-        """
-        samtools faidx $fasta
-        """
-    }
-} else {
-    bwa_index = file("${params.bwa_index}")
 }
 
-
-
-
-/*
- * 
- * STEP 0 - FastQC 
- * 
-*/
-
-
-process fastqc {
-
-    tag "$name"
-        publishDir "${params.outdir}/fastqc", mode: 'copy',
-        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
-
-        input:
-        set val(name), file(reads) from read_files_fastqc
-
-        output:
-        file '*_fastqc.{zip,html}' into fastqc_results
-        file '.command.out' into fastqc_stdout
-
-        script:
-        """
-        fastqc -q $reads
-        """
-}
-/*
- * STEP 1 - trim with trim galore
- */
-
-if(params.notrim){
-    trimmed_reads = read_files_trimming
-    trimgalore_results = []
-    trimgalore_logs = []
-} else {
-    process trim_galore {
-        tag "$name"
-        publishDir "${params.outdir}/trim_galore", mode: 'copy', 
-            saveAs: {filename -> 
-                if (filename.indexOf("_fastqc") > 0) "FastQC/$filename"
-                else if (filename.indexOf("trimming_report.txt") > 0) "logs/$filename"
-                else params.saveTrimmed ? filename : null
-            }
-        input:
-        set val(name), file(reads) from read_files_trimming
-
-        output:
-        set val(name), file(reads) into trimmed_reads
-        file '*trimming_report.txt' into trimgalore_results, trimgalore_logs
-
-
-        script:
-        single = reads instanceof Path
-        c_r1 = params.clip_r1 > 0 ? "--clip_r1 ${params.clip_r1}" : ''
-        c_r2 = params.clip_r2 > 0 ? "--clip_r2 ${params.clip_r2}" : ''
-        tpc_r1 = params.three_prime_clip_r1 > 0 ? "--three_prime_clip_r1 ${params.three_prime_clip_r1}" : ''
-        tpc_r2 = params.three_prime_clip_r2 > 0 ? "--three_prime_clip_r2 ${params.three_prime_clip_r2}" : ''
-        if (params.singleEnd) {
-            """
-            trim_galore --gzip $c_r1 $tpc_r1 $reads --fastqc
-            """
-        } else {
-            """
-            trim_galore --paired --gzip $c_r1 $c_r2 $tpc_r1 $tpc_r2 $reads --fastqc
-            """
-        }
-    }
-}
-
-/*
- * STEP 2 - Map with BWA Mem
- */
-
-process bwamem {
-    tag "$name"
-
-    input:
-    set val(name), file(reads) from trimmed_reads
-    file(bwa_index) from bwa_index
-
-    output:
-    set val(name), file("${name}_bwa.bam") into mappedBam
-    file '.command.log' into bwa_stdout
-
-    script:
-    def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
-    rg="\'@RG\\tID:${params.run_id}\\tSM:${params.run_id}\\tPL:illumina\'"
-
-    """
-    bwa mem \\
-    -R $rg \\
-    -t ${task.cpus} \\
-    $params.gfasta \\
-    $reads | samtools sort -m ${avail_mem} -O bam -T - >${name}_bwa.bam
-    """
-}
-
-if(params.multiLane) {
-
-singleBam = Channel.create()
-groupedBam = Channel.create()
-mappedBam.groupTuple(by:[0,1,2])
-  .choice(singleBam, groupedBam) {it[3].size() > 1 ? 1 : 0}
-
-process MergeBams {
-  tag "${sampleID}"
-
-  input:
-    set val(sampleID), file(bam) from groupedBam
-
-  output:
-    set val(sampleID), file("${sampleID}.bam") into mergedBam
-
-  when: step == 'bwamem'
-
-  script:
-  def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
-  """
-  samtools merge -@ ${task.cpus} -m ${task.memory} ${bam} | samtools sort -@ ${task.cpus} -m ${avail_mem} -O bam -T - > ${sampleID}_bwa.bam
-  """
-}
-
-} else{
-mergedBam = mappedBam
-}
-
-
-
-/*
-*  STEP 4 - Mark PCR duplicates in sorted BAM file
-*/
 
 process markDuplicates {
-
     tag "${name}"
-    publishDir "${params.outdir}/Picard_Markduplicates/metrics", mode: 'copy',
-        saveAs: { filename -> filename.indexOf(".dup_metrics") > 0 ? filename : null }
+
+    publishDir "${params.outdir}/Picard_Markduplicates/metrics", mode: 'symlink',
+        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
-    set val(name), file(sorted_bam) from mergedBam
+    set val(name), file(merged_bam) from mergedBamForMkDup
 
     output:
-    set val(name), file("${name}_markdup.bam"), file("${name}_markdup.bai") into samples_markdup_bam, samples_for_applyBQSR
+    set val(name), file("${name}_merged.sorted.markdup.bam"), file("${name}_merged.sorted.markdup.bai") into samples_markdup_bam, samples_for_applyBQSR, mkdupResults
     file("${name}.dup_metrics") into markdup_results
     file '.command.log' into markDuplicates_stdout
 
     script:
     """
-        mkdir `pwd`/tmp
         java -Xmx${task.memory.toGiga()}g -jar $PICARD MarkDuplicates \\
-        INPUT=$sorted_bam \\
-        OUTPUT=${name}_markdup.bam \\
+        INPUT=$merged_bam \\
+        OUTPUT=${name}_merged.sorted.markdup.bam \\
         METRICS_FILE=${name}.dup_metrics \\
         REMOVE_DUPLICATES=false \\
         CREATE_INDEX=true \\
@@ -383,22 +225,21 @@ process markDuplicates {
 }
 
 
-
-
 /*
  * Step 5 - Recalibrate BAM file with known variants and BaseRecalibrator
  *
 */
 process recalibrateBam {
     tag "${name}"
-    publishDir "${params.outdir}/GATK_Recalibration", mode: 'copy'
+    publishDir "${params.outdir}/GATK_Recalibration", mode: 'symlink',
+        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
 
     input:
     set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_markdup_bam
 
     output:
-    set val(name), file("${name}_table.recal") into samples_recal_reports
+    set val(name), file("${name}_table.recal") into samples_recal_reports, recalReportResults
     file '.command.log' into gatk_stdout
     file '.command.log' into gatk_base_recalibration_results
 
@@ -429,14 +270,15 @@ process recalibrateBam {
 
 process applyBQSR {
     tag "${name}"
-    publishDir "${params.outdir}/GATK_ApplyBQSR", mode: 'copy'
+    publishDir "${params.outdir}/GATK_ApplyBQSR", mode: 'symlink',
+        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
     set val(name), file("${name}_table.recal") from samples_recal_reports
     set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_for_applyBQSR
 
     output:
-    set val(name), file("${name}.bam"), file("${name}.bai") into bam_vcall, bam_metrics, bam_vanno
+    set val(name), file("${name}.bam"), file("${name}.bai") into bam_vcall, bam_metrics, bam_vanno, recalBamsResult
 
     script:
     if(params.exome){
@@ -472,7 +314,8 @@ process applyBQSR {
 
 process collectMultiMetrics {
     tag "${name}"
-    publishDir "${params.outdir}/picard_multimetrics", mode: 'copy'
+    publishDir "${params.outdir}/picard_multimetrics", mode: 'copy',
+        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
     set val(name), file(realign_bam), file(realign_bam_ind) from bam_metrics
@@ -490,104 +333,6 @@ process collectMultiMetrics {
     """
 }
 
-
-/*
- * Step 8 - Call Variants with HaplotypeCaller in GVCF mode (differentiate between exome and whole genome data here)
- *
-*/
-
-process variantCall {
-    tag "${name}"
-    publishDir "${params.outdir}/GATK_VariantCalling/", mode: 'copy',
-        saveAs: {filename -> filename.replaceFirst(/variants/, "raw_variants")}
-
-    input:
-    set val(name), file(realign_bam), file(realign_bam_ind) from bam_vcall
-
-    output:
-    set val(name), file("${name}_variants.vcf"), file("${name}_variants.vcf.idx") into raw_variants_GATK, raw_variants_vep
-
-    script:
-    if(params.exome){
-    """
-    gatk HaplotypeCaller \\
-        -I $realign_bam \\
-        -R $params.gfasta \\
-        -O ${name}_variants.vcf \\
-        -ERC GVCF \\
-        -L $params.target \\
-        --create-output-variant-index \\
-        --annotation MappingQualityRankSumTest \\
-        --annotation QualByDepth \\
-        --annotation ReadPosRankSumTest \\
-        --annotation RMSMappingQuality \\
-        --annotation FisherStrand \\
-        --annotation Coverage \\
-        --dbsnp $params.dbsnp \\
-        --verbosity INFO \\
-        --java-options -Xmx${task.memory.toGiga()}g
-    """
-    } else { // We have a winner (genome)
-    """
-    gatk HaplotypeCaller \\
-        -I $realign_bam \\
-        -R $params.gfasta \\
-        -O ${name}_variants.vcf \\
-        -ERC GVCF \\
-        --create-output-variant-index \\
-        --annotation MappingQualityRankSumTest \\
-        --annotation QualByDepth \\
-        --annotation ReadPosRankSumTest \\
-        --annotation RMSMappingQuality \\
-        --annotation FisherStrand \\
-        --annotation Coverage \\
-        --dbsnp $params.dbsnp \\
-        --verbosity INFO \\
-        --java-options -Xmx${task.memory.toGiga()}g
-    """
-    }
-}
-
-/*
- * Step 15 - Annotate Variants with VEP
- * 
-*/
-
-
-/*
-process vepAnnotation {
-    tag "${name}"
-    publishDir "${params.outdir}/VEP_AnnotatedVariants/", mode: 'copy', 
-    saveAs: {filename -> params.saveIntermediateVariants ? "$filename" : null }
-
-    input:
-    set val(name), file(phased_vcf), file(phased_vcf_ind) from raw_variants_vep
-
-    output:
-    set val(name), file("${name}_variants_vep.vcf"), file("${name}_variants_vep.vcf.idx")
-
-
-    script:
-    
-    """
-        vep \\
-        -i $phased_vcf \\
-        -o ${name}_variants_vep.vcf \\
-        --fork ${task.cpus} \\
-        --offline \\
-        --cache \\
-        --fasta $params.vep_fasta \\
-        --dir_cache $params.vep_cache \\
-        --cache_version 94 \\
-        --force_overwrite \\
-        --no_stats \\
-        --buffer_size 10000 \\
-        --coding_only \\
-        --everything
-
-    """
-}
-*/
 
 
 /*
