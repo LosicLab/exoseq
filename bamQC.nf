@@ -168,15 +168,14 @@ if(! params.multiLane){
         set val(name), file(bams) from inputBam
 
         output:
-        set val(name), file("${name}_merged.sorted.bam"), file("${name}_merged.sorted.bai") into mergedBamResults, mergedBamForMkDup
+        set val(name), file("${name}.bam"), file("${name}.bam.bai") into mergedBamResults, mergedBamForMkDup
 
         script:
         def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
 
         """
-        samtools merge -@ ${task.cpus} ${name}.merged.bam $bams
-        samtools sort ${name}.merged.bam -m ${avail_mem} -@ ${task.cpus} -O bam -T ${name} > ${name}.merged.sorted.bam
-        samtools index ${name}.merged.sorted.bam
+        samtools merge -@ ${task.cpus} ${name}.bam $bams 
+        samtools index ${name}.bam
         """
     }
 
@@ -190,10 +189,10 @@ process markDuplicates {
         saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
-    set val(name), file(merged_bam) from mergedBamForMkDup
+    set val(name), file(merged_bam), file(merged_bai) from mergedBamForMkDup
 
     output:
-    set val(name), file("${name}_merged.sorted.markdup.bam"), file("${name}_merged.sorted.markdup.bai") into samples_markdup_bam, samples_for_applyBQSR, mkdupResults
+    set val(name), file("${name}.sorted.markdup.bam"), file("${name}.sorted.markdup.bam.bai") into samples_markdup_bam, samples_for_applyBQSR, mkdupResults
     file("${name}.dup_metrics") into markdup_results
     file '.command.log' into markDuplicates_stdout
 
@@ -201,7 +200,7 @@ process markDuplicates {
     """
         java -Xmx${task.memory.toGiga()}g -jar $PICARD MarkDuplicates \\
         INPUT=$merged_bam \\
-        OUTPUT=${name}_merged.sorted.markdup.bam \\
+        OUTPUT=${name}.sorted.markdup.bam \\
         METRICS_FILE=${name}.dup_metrics \\
         REMOVE_DUPLICATES=false \\
         CREATE_INDEX=true \\
@@ -221,7 +220,7 @@ process recalibrateBam {
 
 
     input:
-    set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_markdup_bam
+    set val(name), file(markdup_bam), file(markdup_bai) from samples_markdup_bam
 
     output:
     set val(name), file("${name}_table.recal") into samples_recal_reports, recalReportResults
@@ -263,7 +262,7 @@ process applyBQSR {
     set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_for_applyBQSR
 
     output:
-    set val(name), file("${name}.bam"), file("${name}.bai") into bam_vcall, bam_metrics, bam_vanno, recalBamsResult
+    set val(name), file("${name}.sorted.markdup.bam"), file("${name}.sorted.markdup.bam.bai") into bam_metrics, recalBamsResult
 
     script:
     if(params.exome){
