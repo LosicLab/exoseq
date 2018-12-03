@@ -154,14 +154,12 @@ try {
 
 // merge multi-lane bams if necessary
 if(! params.multiLane){
-    mergedBamForMkDup = inputBam
+    mergedBamForRG = inputBam
 
 }else{
     
     process mergeBamFiles {
         tag "${name}"
-
-        publishDir "${params.outdir}/mergedBamFiles", mode: 'symlink'
 
         input:
         set val(name), file(bams) from inputBam
@@ -180,11 +178,37 @@ if(! params.multiLane){
 
 }
 
+process editBamHeaders {
+    tag "${name}"
+
+    input:
+    set val(name), file(merged_bam), file(merged_bai) from mergedBamForRG
+
+    output:
+    set val(name), file('${name}.bam'), file('${name}.bai') into mergedBamForMkDup
+
+    script:
+    """
+    java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
+      I=$merged_bam \\
+      O=${name}.bam \\
+      RGID=${name} \\
+      RGLB=${name} \\
+      RGPL=illumina \\
+      RGPU=${name} \\
+      RGSM=${name} \\
+      SORT_ORDER=coordinate  \\
+      CREATE_INDEX=true
+    """
+
+}
+
+
 // mark duplicate reads with Picard
 process markDuplicates {
     tag "${name}"
 
-    publishDir "${params.outdir}/Picard_Markduplicates", mode: 'symlink'
+    publishDir "${params.outdir}/${name}/Picard_Markduplicates", mode: 'copy'
 
     input:
     set val(name), file(merged_bam), file(merged_bai) from mergedBamForMkDup
