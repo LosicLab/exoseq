@@ -154,7 +154,7 @@ try {
 
 // merge multi-lane bams if necessary
 if(! params.multiLane){
-    mergedBamForMkDup = inputBam
+    mergedBamForRG = inputBam
 
 }else{
     
@@ -180,7 +180,30 @@ if(! params.multiLane){
 
 process editBamHeaders {
     tag "${name}"
+<<<<<<< HEAD
  
+=======
+
+    input:
+    set val(name), file(merged_bam), file(merged_bai) from mergedBamForRG
+
+    output:
+    set val(name), file('${name}.bam'), file('${name}.bai') into mergedBamForMkDup
+
+    script:
+    """
+    java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
+      I=$merged_bam \\
+      O=${name}.bam \\
+      RGID=${name} \\
+      RGLB=${name} \\
+      RGPL=illumina \\
+      RGPU=${name} \\
+      RGSM=${name} \\
+      SORT_ORDER=coordinate  \\
+      CREATE_INDEX=true
+    """
+>>>>>>> 9206d7d4afc80a1706873f6f0151c51275be1ac3
 
 }
 

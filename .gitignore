@@ -12,3 +12,4 @@ NGI-ExoSeq_TestReport.html*
 *.dot*
 *.png
 *.svg
+.*.nf
