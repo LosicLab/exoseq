@@ -161,8 +161,6 @@ if(! params.multiLane){
     process mergeBamFiles {
         tag "${name}"
 
-        publishDir "${params.outdir}/mergedBamFiles", mode: 'symlink'
-
         input:
         set val(name), file(bams) from inputBam
 
@@ -180,11 +178,18 @@ if(! params.multiLane){
 
 }
 
+process editBamHeaders {
+    tag "${name}"
+ 
+
+}
+
+
 // mark duplicate reads with Picard
 process markDuplicates {
     tag "${name}"
 
-    publishDir "${params.outdir}/Picard_Markduplicates", mode: 'symlink'
+    publishDir "${params.outdir}/${name}/Picard_Markduplicates", mode: 'copy'
 
     input:
     set val(name), file(merged_bam), file(merged_bai) from mergedBamForMkDup
@@ -209,7 +214,7 @@ process markDuplicates {
 
 process collectMultiMetrics_unrecal {
     tag "${name}"
-    publishDir "${params.outdir}/picard_multimetrics", mode: 'symlink'
+    publishDir "${params.outdir}/${name}/picard_multimetrics/", mode: 'copy'
 
     input:
     set val(name), file(realign_bam), file(realign_bam_ind) from unrecal_bam_metrics

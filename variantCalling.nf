@@ -81,12 +81,16 @@ if (!params.nbam || !params.genome){
 Channel
     .fromFilePairs(params.nbam, size: 1)
     .ifEmpty { exit 1, "Cannot find any bams matching: ${params.nbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
-    .into(normalBAM_hc, normalBAM_mutect)
+    .into{normalBAM_mutect; normalBAM_hc}
+
+
+
 if(params.tbam) {
+
     Channel
     .fromFilePairs(params.tbam, size: 1)
     .ifEmpty { exit 1, "Cannot find any bams matching: ${params.tbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
-    .into(tumorBAM_hc, tumorBAM_mutect)
+    .into{tumorBAM_mutect; tumorBAM_hc}
     }
 
 // Show help when needed
@@ -157,11 +161,12 @@ try {
 }
 
 
-process callSNPs {
-    tag "${name}"
-    publishDir "${params.outdir}/snpCalls/", mode: 'symlink'
+
+if(!params.tbam){
+    process callSNPs {
+        tag "${name}"
+        publishDir "${params.outdir}/snpCalls/", mode: 'copy'
     
-    if(!params.tbam){
         input:
         set val(name), file(normal_bam), file(normal_bai) from normalBAM_hc
         
@@ -188,54 +193,59 @@ process callSNPs {
             --verbosity INFO \\
             --java-options -Xmx${task.memory.toGiga()}g
         """
+        }
 
-    } else{
-        input:
-        set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_hc
-        set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_hc
-        
-        output:
-        set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
-        set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
+} else{
+    process callSNPs {
+    tag "${normalID} & ${tumorID}"
+    publishDir "${params.outdir}/snpCalls/", mode: 'copy'
 
-        script:
+    input:
+    set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_hc
+    set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_hc
+    
+    output:
+    set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
+    set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
+
+    script:
+    """
+    gatk HaplotypeCaller \\
+        -I $normal_bam \\
+        -R $params.gfasta \\
+        -O ${normalID}_rawsnps.vcf \\
+        -ERC GVCF \\
+        -L $params.target \\
+        --create-output-variant-index \\
+        --annotation MappingQualityRankSumTest \\
+        --annotation QualByDepth \\
+        --annotation ReadPosRankSumTest \\
+        --annotation RMSMappingQuality \\
+        --annotation FisherStrand \\
+        --annotation Coverage \\
+        --dbsnp $params.dbsnp \\
+        --verbosity INFO \\
+        --java-options -Xmx${task.memory.toGiga()}g
+    
+    gatk HaplotypeCaller \\
+        -I $tumor_bam \\
+        -R $params.gfasta \\
+        -O ${tumorID}_rawsnps.vcf \\
+        -ERC GVCF \\
+        -L $params.target \\
+        --create-output-variant-index \\
+        --annotation MappingQualityRankSumTest \\
+        --annotation QualByDepth \\
+        --annotation ReadPosRankSumTest \\
+        --annotation RMSMappingQuality \\
+        --annotation FisherStrand \\
+        --annotation Coverage \\
+        --dbsnp $params.dbsnp \\
+        --verbosity INFO \\
+        --java-options -Xmx${task.memory.toGiga()}g
+
         """
-        gatk HaplotypeCaller \\
-            -I $normal_bam \\
-            -R $params.gfasta \\
-            -O ${normalID}_rawsnps.vcf \\
-            -ERC GVCF \\
-            -L $params.target \\
-            --create-output-variant-index \\
-            --annotation MappingQualityRankSumTest \\
-            --annotation QualByDepth \\
-            --annotation ReadPosRankSumTest \\
-            --annotation RMSMappingQuality \\
-            --annotation FisherStrand \\
-            --annotation Coverage \\
-            --dbsnp $params.dbsnp \\
-            --verbosity INFO \\
-            --java-options -Xmx${task.memory.toGiga()}g
-        
-        gatk HaplotypeCaller \\
-            -I $tumor_bam \\
-            -R $params.gfasta \\
-            -O ${tumorID}_rawsnps.vcf \\
-            -ERC GVCF \\
-            -L $params.target \\
-            --create-output-variant-index \\
-            --annotation MappingQualityRankSumTest \\
-            --annotation QualByDepth \\
-            --annotation ReadPosRankSumTest \\
-            --annotation RMSMappingQuality \\
-            --annotation FisherStrand \\
-            --annotation Coverage \\
-            --dbsnp $params.dbsnp \\
-            --verbosity INFO \\
-            --java-options -Xmx${task.memory.toGiga()}g
-
-            """
-    }
+        }
 }
 
 
@@ -244,7 +254,7 @@ if(params.tbam) {
     // This will give as a list of unfiltered calls for MuTect2.
     process callSomaticVariants {
     tag {normalID + "-vs-" + tumorID}
-    publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'symlink'
+    publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'copy'
 
     input:
         set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_mutect
@@ -265,7 +275,6 @@ if(params.tbam) {
             -O ${tumorID}_vs_${normalID}.vcf
     """
     }
-
 
 }
 

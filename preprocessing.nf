@@ -203,7 +203,7 @@ if(! params.bwa_index){
 process fastqc {
 
     tag "$name"
-        publishDir "${params.outdir}/fastqc", mode: 'symlink',
+        publishDir "${params.outdir}/fastqc", mode: 'copy',
         saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
 
         input:
@@ -227,7 +227,7 @@ if(params.notrim){
 } else {
     process trim_galore {
         tag "$name"
-        publishDir "${params.outdir}/trim_galore", mode: 'symlink'
+        publishDir "${params.outdir}/trim_galore", mode: 'copy'
 
         input:
         set val(name), file(reads) from read_files_trimming
