@@ -154,7 +154,7 @@ try {
 
 // merge multi-lane bams if necessary
 if(! params.multiLane){
-    mergedBamForRG = inputBam
+    mergedBamForMkDup = inputBam
 
 }else{
     
@@ -165,7 +165,7 @@ if(! params.multiLane){
         set val(name), file(bams) from inputBam
 
         output:
-        set val(name), file("${name}.bam"), file("${name}.bam.bai") into mergedBamResults, mergedBamForMkDup
+        set val(name), file("${name}.sorted.bam"), file("${name}.sorted.bai") into mergedBamResults, mergedBamForMkDup
 
         script:
         def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
@@ -173,40 +173,49 @@ if(! params.multiLane){
         """
         samtools merge -@ ${task.cpus} ${name}.bam $bams 
         samtools index ${name}.bam
+
+        java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
+        I=${name}.bam \\
+        O=${name}.sorted.bam \\
+        RGID=${name} \\
+        RGLB=${name} \\
+        RGPL=illumina \\
+        RGPU=${name} \\
+        RGSM=${name} \\
+        SORT_ORDER=coordinate  \\
+        CREATE_INDEX=TRUE \\
         """
     }
 
 }
 
+/*
 process editBamHeaders {
     tag "${name}"
-<<<<<<< HEAD
- 
-=======
-
+    
     input:
     set val(name), file(merged_bam), file(merged_bai) from mergedBamForRG
 
     output:
-    set val(name), file('${name}.bam'), file('${name}.bai') into mergedBamForMkDup
-
+    set val(name), file("${name}.sorted.markdup.bam"), file("${name}.sorted.markdup.bai") into mergedBamForMkDup
+    file("${name}.dup_metrics") into rg_results
+    file '.command.log' into rg_stdout
+    
     script:
     """
     java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
-      I=$merged_bam \\
-      O=${name}.bam \\
-      RGID=${name} \\
-      RGLB=${name} \\
-      RGPL=illumina \\
-      RGPU=${name} \\
-      RGSM=${name} \\
-      SORT_ORDER=coordinate  \\
-      CREATE_INDEX=true
+    I=$merged_bam \\
+    O=${name}.sorted.markdup.bam \\
+    RGID=${name} \\
+    RGLB=${name} \\
+    RGPL=illumina \\
+    RGPU=${name} \\
+    RGSM=${name} \\
+    SORT_ORDER=coordinate  \\
+    CREATE_INDEX=TRUE \\
     """
->>>>>>> 9206d7d4afc80a1706873f6f0151c51275be1ac3
-
 }
-
+*/
 
 // mark duplicate reads with Picard
 process markDuplicates {
@@ -218,53 +227,33 @@ process markDuplicates {
     set val(name), file(merged_bam), file(merged_bai) from mergedBamForMkDup
 
     output:
-    set val(name), file("${name}.sorted.markdup.bam"), file("${name}.sorted.markdup.bai") into unrecal_bam_metrics, samples_markdup_bam, samples_for_applyBQSR, mkdupResults
+    set val(name), file("${name}.markdup.bam"), file("${name}.markdup.bai") into bamRecal, samples_for_applyBQSR, mkdupResults
     file("${name}.dup_metrics") into markdup_results
     file '.command.log' into markDuplicates_stdout
 
     script:
     """
-        java -Xmx${task.memory.toGiga()}g -jar $PICARD MarkDuplicates \\
-        INPUT=$merged_bam \\
-        OUTPUT=${name}.sorted.markdup.bam \\
-        METRICS_FILE=${name}.dup_metrics \\
-        REMOVE_DUPLICATES=false \\
-        CREATE_INDEX=true \\
-
-       
+    java -Xmx${task.memory.toGiga()}g -jar $PICARD MarkDuplicates \\
+    INPUT=$merged_bam \\
+    OUTPUT=${name}.markdup.bam \\
+    METRICS_FILE=${name}.dup_metrics \\
+    REMOVE_DUPLICATES=false \\
+    CREATE_INDEX=true \\ 
     """
 }
 
-process collectMultiMetrics_unrecal {
-    tag "${name}"
-    publishDir "${params.outdir}/${name}/picard_multimetrics/", mode: 'copy'
 
-    input:
-    set val(name), file(realign_bam), file(realign_bam_ind) from unrecal_bam_metrics
-
-    output:
-    file "${name}.multimetrics.*" into picard_multimetrics_unrecal
-    file '.command.log' into qc_stdout
-
-    script:
-    """
-    java -Xmx${task.memory.toGiga()}g -jar $PICARD CollectMultipleMetrics \\
-      I=$realign_bam \\
-      O=${name}.multimetrics \\
-      R=$params.gfasta \\
-    """
-}
 
 // Recalibrate BAM file with known variants and BaseRecalibrator
-/*
+
 process recalibrateBam {
     tag "${name}"
-    publishDir "${params.outdir}/GATK_Recalibration", mode: 'symlink',
+    publishDir "${params.outdir}/${name}/GATK_Recalibration", mode: 'copy',
         saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
 
     input:
-    set val(name), file(markdup_bam), file(markdup_bai) from samples_markdup_bam
+    set val(name), file(markdup_bam), file(markdup_bai) from bamRecal
 
     output:
     set val(name), file("${name}_table.recal") into samples_recal_reports, recalReportResults
@@ -298,15 +287,15 @@ process recalibrateBam {
 
 process applyBQSR {
     tag "${name}"
-    publishDir "${params.outdir}/GATK_ApplyBQSR", mode: 'symlink',
+    publishDir "${params.outdir}/${name}/GATK_ApplyBQSR", mode: 'copy',
         saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
-    set val(name), file("${name}_table.recal") from samples_recal_reports
+    set val(name), file(recal_report) from samples_recal_reports
     set val(name), file(markdup_bam), file(markdup_bam_ind) from samples_for_applyBQSR
 
     output:
-    set val(name), file("${name}.sorted.markdup.recal.bam"), file("${name}.sorted.markdup.recal.bai") into recal_bam_metrics, recalBamsResult
+    set val(name), file("${name}.sorted.markdup.recal.bam"), file("${name}.sorted.markdup.recal.bai") into bam_metrics, recalBamsResult
 
     script:
     if(params.exome){
@@ -314,7 +303,7 @@ process applyBQSR {
     gatk ApplyBQSR \\
         -R $params.gfasta \\
         -I $markdup_bam \\
-        --bqsr-recal-file ${name}_table.recal \\
+        --bqsr-recal-file $recal_report \\
         -O ${name}.sorted.markdup.recal.bam \\
         -L $params.target \\
         --create-output-bam-index true \\
@@ -325,7 +314,7 @@ process applyBQSR {
     gatk ApplyBQSR \\
         -R $params.gfasta \\
         -I $markdup_bam \\
-        --bqsr-recal-file ${name}_table.recal \\
+        --bqsr-recal-file $recal_report \\
         -O ${name}.sorted.markdup.recal.bam \\
         --create-output-bam-index true \\
         --java-options -Xmx${task.memory.toGiga()}g
@@ -337,15 +326,15 @@ process applyBQSR {
 // calculate QC metrics for bam files with Picard
 process collectMultiMetrics {
     tag "${name}"
-    publishDir "${params.outdir}/picard_multimetrics", mode: 'symlink',
+    publishDir "${params.outdir}/${name}/recal_multimetrics", mode: 'copy',
         saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
 
     input:
-    set val(name), file(realign_bam), file(realign_bam_ind) from recal_bam_metrics
+    set val(name), file(realign_bam), file(realign_bam_ind) from bam_metrics
 
     output:
-    file "${name}.multimetrics.*" into picard_multimetrics
-    file '.command.log' into qc_stdout
+    file "${name}.multimetrics.*" into picard_multimetrics2
+    file '.command.log' into qc_stdout2
 
     script:
     """
@@ -355,7 +344,6 @@ process collectMultiMetrics {
       R=$params.gfasta \\
     """
 }
-*/
 
 
 /*
