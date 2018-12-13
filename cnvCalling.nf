@@ -38,7 +38,7 @@ given. It is recommended to process one sample per nextflow run.
 The available paramaters are listed below based on category
 
 Required parameters:
-    --bam                        Absolute path to NORMAL input bam file for sample (MUST use regex '*' in name)
+    --bam                         Absolute path to bam list (MUST use regex '*' in name)
     --genome                      Name of Genome reference, [Default: 'GRCh38']
 
 Required if running minerva profile:
@@ -150,69 +150,79 @@ try {
 
 process depthOfCoverage {
     tag "${name}"
-
+    publishDir "${params.outdir}/GATK", mode: 'copy'
 
     input:
+    set val(name), file() from inputBamGroup
 
     output:
+    set val(name), file("${name}.DATA") into depthData, depthDataResults
 
     script:
     """
-    java ‐Xmx3072m ‐jar Sting/dist/GenomeAnalysisTK.jar
-    ‐T DepthOfCoverage ‐I group1.READS.bam.list ‐L
-    EXOME.interval_list
-    ‐R human_g1k_v37.fasta
-    ‐dt BY_SAMPLE ‐dcov 5000 ‐l INFO ‐‐omitDepthOutputAtEachBase ‐omitLocusTable
-    ‐‐minBaseQuality 0 ‐‐minMappingQuality 20
-    ‐‐start 1 ‐‐stop 5000 ‐‐nBins 200
-    ‐‐includeRefNSites
-    ‐‐countType COUNT_FRAGMENTS
-    ‐o group1.DATA
-
-    java ‐Xmx3072m ‐jar Sting/dist/GenomeAnalysisTK.jar
-    ‐T DepthOfCoverage ‐I group2.READS.bam.list ‐L
-    EXOME.interval_list
-    ‐R human_g1k_v37.fasta
-    ‐dt BY_SAMPLE ‐dcov 5000 ‐l INFO ‐‐omitDepthOutputAtEachBase ‐‐omitLocusTable
-    ‐‐minBaseQuality 0 ‐‐minMappingQuality 20
-    ‐‐start 1 ‐‐stop 5000 ‐‐nBins 200
-    ‐‐includeRefNSites
-    ‐‐countType COUNT_FRAGMENTS
-    ‐o group2.DATA
+    java -Xmx${task.memory.toGiga()}g ‐jar $GATK_JAR \\
+    ‐T DepthOfCoverage 
+    ‐I $bamList \\
+    ‐L $params.target \\
+    ‐R $params.gfasta \\
+    ‐dt BY_SAMPLE \\
+    ‐dcov 5000  \\
+    ‐l INFO \\ 
+    ‐‐omitDepthOutputAtEachBase \\
+    -‐omitLocusTable\\
+    ‐‐minBaseQuality 0 \\
+    ‐‐minMappingQuality 20 \\
+    ‐‐start 1 \\
+    ‐‐stop 5000 \\
+    ‐‐nBins 200 \\
+    ‐‐includeRefNSites \\
+    ‐‐countType COUNT_FRAGMENTS \\
+    ‐o ${name}.DATA
     """
 
 }
 
 process combineDOC {
-    
+    tag "${name}"
+    publishDir "${params.outdir}/GATK", mode: 'copy'
+      
     input:
-
+    
     output:
+    set val(name), file("${name}.RD.txt") into combinedDepthData, depthOfCoverageResultsCombined
+
 
     script:
     """
-    xhmm ‐‐mergeGATKdepths ‐o DATA.RD.txt
-    ‐‐GATKdepths group1.DATA.sample_interval_summary
+    xhmm ‐‐mergeGATKdepths \\
+    ‐o ${name}.RD.txt \\
+    ‐‐GATKdepths group1.DATA.sample_interval_summary \\
     ‐‐GATKdepths group2.DATA.sample_interval_summary
     """
 }
 
 process getGCcontent {
+    tag "${name}"
+    publishDir "${params.outdir}/GATK", mode: 'copy'
     
     input:
 
     output:
+    set val(name), file("${name}.locus_GC.txt") into gcContentData
+    set val(name), file("${name}.extreme_gc_targets.txt") into extremeGCtargets
+
 
     script:
     """
-    java ‐Xmx3072m ‐jar Sting/dist/GenomeAnalysisTK.jar
-    ‐T GCContentByInterval ‐L EXOME.interval_list
-    ‐R human_g1k_v37.fasta
-    ‐o DATA.locus_GC.txt
+    java -Xmx${task.memory.toGiga()}g ‐jar $GATK_JAR \\
+    ‐T GCContentByInterval \\
+    ‐L $params.target \\
+    ‐R $params.gfasta \\
+    ‐o ${name}.locus_GC.txt \\
 
 
-    cat DATA.locus_GC.txt | awk '{if ($2 < 0.1 ∥︀ $2 > 0.9) print $1}'
-    > extreme_gc_targets.txt
+    cat ${name}.locus_GC.txt | awk '{if ($2 < 0.1 ∥︀ $2 > 0.9) print $1}'
+    > ${name}.extreme_gc_targets.txt
     """
 
 
@@ -221,27 +231,34 @@ process getGCcontent {
 
 process filterAndPrep {
     tag "${name}"
-    publishDir "${params.outdir}/${name}/", mode: 'copy',
-        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
+    publishDir "${params.outdir}/xhmm/", mode: 'copy'
+    
+    
     input:
+    set val(name), file(inputList) from combinedDepthData
+    set val(name), file(extremeGC) from extremeGCtargets
 
     output:
-
+    set val(name), file("${name}_filtered_targets.txt"), file("${name}_filtered_samples.txt") into excludedOutputResults, excludedOutputs
+    set val(name), file("${name}_filtered_centered.RD.txt") into filteredPreppedMatrix, filterPrepMatrixResults
 
     script:
     """
-    xhmm \\
-    ‐‐matrix ‐r DATA.RD.txt \\
-    ‐‐centerData ‐‐centerType target \\
-    ‐o DATA.filtered_centered.RD.txt \\
-    ‐‐outputExcludedTargets \\
-    DATA.filtered_centered.RD.txt.filtered_targets.txt \\
-    ‐‐outputExcludedSamples \\
-    DATA.filtered_centered.RD.txt.filtered_samples.txt \\
-    ‐‐excludeTargets extreme_gc_targets.txt ‐‐excludeTargets low_complexity_targets.txt \\
-    ‐‐minTargetSize 10 ‐‐maxTargetSize 10000 \\
-    ‐‐minMeanTargetRD 10 ‐‐maxMeanTargetRD 500 \\
-    ‐‐minMeanSampleRD 25 ‐‐maxMeanSampleRD 200 \\
+    xhmm ‐‐matrix \\
+    ‐r $inputList \\
+    ‐‐centerData \\ 
+    ‐‐centerType target \\
+    ‐o ${name}_filtered_centered.RD.txt \\
+    ‐‐outputExcludedTargets ${name}_filtered_targets.txt \\
+    ‐‐outputExcludedSamples ${name}_filtered_samples.txt \\
+    ‐‐excludeTargets $extremeGC \\
+    ‐‐excludeTargets low_complexity_targets.txt \\
+    ‐‐minTargetSize 10 \\
+    ‐‐maxTargetSize 10000 \\
+    ‐‐minMeanTargetRD 10 \\
+    ‐‐maxMeanTargetRD 500 \\
+    ‐‐minMeanSampleRD 25 \\
+    ‐‐maxMeanSampleRD 200 \\
     ‐‐maxSdSampleRD 150
     """
 
@@ -249,22 +266,114 @@ process filterAndPrep {
 
 process meancenteredPCA {
    tag "${name}"
-    publishDir "${params.outdir}/${name}/", mode: 'copy',
-        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
+    publishDir "${params.outdir}/xhmm/", mode: 'copy'
      
     input:
+    set val(name), file(filteredMatrix) from filteredPreppedMatrix
+
+    output:
+    set val(name), file("${name}.RD_PCA*.txt") into mcPCAfiles, mcPCresults
+
+    script:
+    """
+    xhmm ‐‐PCA \\
+    ‐r $filteredMatrix \\
+    ‐‐PCAfiles ${name}.RD_PCA
+    """
+}
+
+
+process normalizePCA {
+   tag "${name}"
+    publishDir "${params.outdir}/xhmm/", mode: 'copy'
+
+    input:
+    set val(name), file(filteredMatrix) from filteredPreppedMatrix
+    set val(name), file(mcPCAdata) from mcPCAfiles
+
+    output:
+    set val(name), file("${name}.PCA_normalized.txt") into normalizedPCs, normalizedPCresults
+
+
+    script:
+    """
+    xhmm ‐‐normalize \\
+    ‐r $filteredPreppedMatrix \\
+    ‐‐PCAfiles DATA.RD_PCA \\
+    ‐‐normalizeOutput ${name}.PCA_normalized.txt \\
+    ‐‐PCnormalizeMethod PVE_mean \\
+    ‐‐PVE_mean_factor 0.7
+    """
+}
+
+process calcZscores {
+   tag "${name}"
+    publishDir "${params.outdir}/xhmm/", mode: 'copy'
+     
+    input:
+    
 
     output:
     
+
     script:
     """
-    xhmm ‐‐PCA ‐r DATA.filtered_centered.RD.txt ‐‐PCAfiles DATA.RD_PCA
+    xhmm ‐‐matrix \\
+    -r $originalMatrix \\
+    ‐‐centerData ‐‐centerType sample \\
+    ‐‐zScoreData \\
+    ‐o ${name}.PCA_normalized.filtered.sample_zscores.RD.txt \\
+    ‐‐outputExcludedTargets ${name}.PCA_normalized.filtered.sample_zscores.RD.txt.filtered_targets.txt \\
+    ‐‐outputExcludedSamples ${name}.PCA_normalized.filtered.sample_zscores.RD.txt.filtered_samples.txt \\
+    ‐‐maxSdTargetRD 30
     """
 }
 
 
 
+process cnvDiscovery {
+   tag "${name}"
+    publishDir "${params.outdir}/xhmm_Discovery/", mode: 'copy'
+     
+    input:
+    
 
+    output:
+    
+
+    script:
+    """
+    xhmm ‐-discover \\
+    -p params.txt \\
+    -r $zscoreMatrix \\
+    ‐R ${name}.same_filtered.RD.txt
+    ‐c ${name}.xcnv 
+    ‐a ${name}.aux_xcnv 
+    ‐s ${name}
+    """
+}
+
+process cnvStats {
+   tag "${name}"
+    publishDir "${params.outdir}/xhmm_STATS/", mode: 'copy'
+     
+    input:
+    
+
+    output:
+    
+
+    script:
+    """
+    xhmm ‐‐genotype \\
+    ‐p params.txt \\
+    ‐r ${name}.PCA_normalized.filtered.sample_zscores.RD.txt \\
+    ‐R ${name}.same_filtered.RD.txt \\
+    ‐g ${name}.xcnv \\
+    ‐F $params.gfasta \\
+    ‐v ${name}_cnv.vcf
+    """
+}
 
 /*
 ================================================================================
