@@ -69,6 +69,7 @@ params.tbam = false
 // Output configuration
 params.outdir = "./variantCall"
 params.saveIntermediateVariants = false
+params.snpCalling = false
 
 
 // Check blocks for certain required parameters, to see they are given and exist
@@ -161,26 +162,62 @@ try {
 }
 
 
+if(params.snpCalling){
+    if(!params.tbam){
+        process callSNPs {
 
-if(!params.tbam){
-    process callSNPs {
-
-        tag "${name}"
-        publishDir "${params.outdir}/snpCalls/", mode: 'copy'
-    
-        input:
-        set val(name), file(normal_bam) from normalBAM_hc
+            tag "${name}"
+            publishDir "${params.outdir}/snpCalls/", mode: 'copy'
         
+            input:
+            set val(name), file(normal_bam) from normalBAM_hc
+            
 
+            output:
+            set val(name), file("${name}_raw_snps.vcf"), file("${name}_raw_snps.vcf.idx") into nVCF_bqsr, nVCF_results
+
+            script:
+            """
+            gatk HaplotypeCaller \\
+                -I $normal_bam \\
+                -R $params.gfasta \\
+                -O ${name}_raw_snps.vcf \\
+                -ERC GVCF \\
+                -L $params.target \\
+                --create-output-variant-index \\
+                --annotation MappingQualityRankSumTest \\
+                --annotation QualByDepth \\
+                --annotation ReadPosRankSumTest \\
+                --annotation RMSMappingQuality \\
+                --annotation FisherStrand \\
+                --annotation Coverage \\
+                --dbsnp $params.dbsnp \\
+                --verbosity INFO \\
+                --java-options -Xmx${task.memory.toGiga()}g
+            """
+            }
+
+    } else{
+        process callSNPs {
+        tag "${normalID} & ${tumorID}"
+        publishDir "${params.outdir}/snpCalls/", mode: 'copy'
+
+        input:
+        set val(normalID), file(normal_bam) from normalBAM_hc
+        set val(tumorID), file(tumor_bam) from tumorBAM_hc
+        
         output:
-        set val(name), file("${name}_raw_snps.vcf"), file("${name}_raw_snps.vcf.idx") into nVCF_bqsr, nVCF_results
+        set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
+        set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
 
         script:
+        tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
+        normalID_short = normalID.substring(0, normalID.indexOf('.'))
         """
         gatk HaplotypeCaller \\
             -I $normal_bam \\
             -R $params.gfasta \\
-            -O ${name}_raw_snps.vcf \\
+            -O ${normalID}_rawsnps.vcf \\
             -ERC GVCF \\
             -L $params.target \\
             --create-output-variant-index \\
@@ -193,64 +230,28 @@ if(!params.tbam){
             --dbsnp $params.dbsnp \\
             --verbosity INFO \\
             --java-options -Xmx${task.memory.toGiga()}g
-        """
-        }
+        
+        gatk HaplotypeCaller \\
+            -I $tumor_bam \\
+            -R $params.gfasta \\
+            -O ${tumorID}_rawsnps.vcf \\
+            -ERC GVCF \\
+            -L $params.target \\
+            --create-output-variant-index \\
+            --annotation MappingQualityRankSumTest \\
+            --annotation QualByDepth \\
+            --annotation ReadPosRankSumTest \\
+            --annotation RMSMappingQuality \\
+            --annotation FisherStrand \\
+            --annotation Coverage \\
+            --dbsnp $params.dbsnp \\
+            --verbosity INFO \\
+            --java-options -Xmx${task.memory.toGiga()}g
 
-} else{
-    process callSNPs {
-    tag "${normalID} & ${tumorID}"
-    publishDir "${params.outdir}/snpCalls/", mode: 'copy'
-
-    input:
-    set val(normalID), file(normal_bam) from normalBAM_hc
-    set val(tumorID), file(tumor_bam) from tumorBAM_hc
-    
-    output:
-    set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
-    set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
-
-    script:
-    tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
-    normalID_short = normalID.substring(0, normalID.indexOf('.'))
-    """
-    gatk HaplotypeCaller \\
-        -I $normal_bam \\
-        -R $params.gfasta \\
-        -O ${normalID}_rawsnps.vcf \\
-        -ERC GVCF \\
-        -L $params.target \\
-        --create-output-variant-index \\
-        --annotation MappingQualityRankSumTest \\
-        --annotation QualByDepth \\
-        --annotation ReadPosRankSumTest \\
-        --annotation RMSMappingQuality \\
-        --annotation FisherStrand \\
-        --annotation Coverage \\
-        --dbsnp $params.dbsnp \\
-        --verbosity INFO \\
-        --java-options -Xmx${task.memory.toGiga()}g
-    
-    gatk HaplotypeCaller \\
-        -I $tumor_bam \\
-        -R $params.gfasta \\
-        -O ${tumorID}_rawsnps.vcf \\
-        -ERC GVCF \\
-        -L $params.target \\
-        --create-output-variant-index \\
-        --annotation MappingQualityRankSumTest \\
-        --annotation QualByDepth \\
-        --annotation ReadPosRankSumTest \\
-        --annotation RMSMappingQuality \\
-        --annotation FisherStrand \\
-        --annotation Coverage \\
-        --dbsnp $params.dbsnp \\
-        --verbosity INFO \\
-        --java-options -Xmx${task.memory.toGiga()}g
-
-        """
-        }
+            """
+            }
+    }
 }
-
 
 
 if(params.tbam) {
