@@ -164,11 +164,12 @@ try {
 
 if(!params.tbam){
     process callSNPs {
+
         tag "${name}"
         publishDir "${params.outdir}/snpCalls/", mode: 'copy'
     
         input:
-        set val(name), file(normal_bam), file(normal_bai) from normalBAM_hc
+        set val(name), file(normal_bam) from normalBAM_hc
         
 
         output:
@@ -201,14 +202,16 @@ if(!params.tbam){
     publishDir "${params.outdir}/snpCalls/", mode: 'copy'
 
     input:
-    set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_hc
-    set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_hc
+    set val(normalID), file(normal_bam) from normalBAM_hc
+    set val(tumorID), file(tumor_bam) from tumorBAM_hc
     
     output:
     set val(tumorID), file("${tumorID}_rawsnps.vcf") into tumor_raw_snps
     set val(normalID), file("${normalID}_rawsnps.vcf") into normal_raw_snps
 
     script:
+    tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
+    normalID_short = normalID.substring(0, normalID.indexOf('.'))
     """
     gatk HaplotypeCaller \\
         -I $normal_bam \\
@@ -253,26 +256,28 @@ if(!params.tbam){
 if(params.tbam) {
     // This will give as a list of unfiltered calls for MuTect2.
     process callSomaticVariants {
-    tag {normalID + "-vs-" + tumorID}
+    tag {"${normalID}" + "-vs-" + "${tumorID}"}
     publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'copy'
 
     input:
-        set val(normalID), file(normal_bam), file(normal_bai) from normalBAM_mutect
-        set val(tumorID), file(tumor_bam), file(tumor_bai) from tumorBAM_mutect
+        set val(normalID), file(normal_bam) from normalBAM_mutect
+        set val(tumorID), file(tumor_bam) from tumorBAM_mutect
 
     output:
         set val("mutect2"), tumorID, normalID, file( "${tumorID}_vs_${normalID}.vcf") into mutect2Output
 
 
     script:
+    tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
+    normalID_short = normalID.substring(0, normalID.indexOf('.'))
     """
-        gatk --java-options "-Xmx${task.memory.toGiga()}g" \
-            Mutect2 \
-            -R ${params.gfasta} \
-            -I ${tumor_bam}  -tumor ${tumorID} \
-            -I ${normal_bam} -normal ${normalID} \
-            -L ${params.target} \
-            -O ${tumorID}_vs_${normalID}.vcf
+            gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
+                Mutect2 \\
+                -R ${params.gfasta} \\
+                -I ${tumor_bam}  -tumor ${tumorID_short} \\
+                -I ${normal_bam} -normal ${normalID_short} \\
+                -L ${params.target} \\
+                -O ${tumorID_short}_vs_${normalID_short}.vcf
     """
     }
 
