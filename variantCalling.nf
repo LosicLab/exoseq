@@ -74,7 +74,7 @@ params.snpCalling = false
 
 // Check blocks for certain required parameters, to see they are given and exist
 if (!params.nbam || !params.genome){
-    exit 1, "Parameters '--bam' and '--genome' are required to run the pipeline"
+    exit 1, "Parameters '--sample' and '--genome' are required to run the pipeline"
 }
 
 
@@ -84,10 +84,7 @@ Channel
     .ifEmpty { exit 1, "Cannot find any bams matching: ${params.nbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
     .into{normalBAM_mutect; normalBAM_hc}
 
-
-
 if(params.tbam) {
-
     Channel
     .fromFilePairs(params.tbam, size: 1)
     .ifEmpty { exit 1, "Cannot find any bams matching: ${params.tbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
@@ -257,28 +254,29 @@ if(params.snpCalling){
 if(params.tbam) {
     // This will give as a list of unfiltered calls for MuTect2.
     process callSomaticVariants {
-    tag {"${normalID}" + "-vs-" + "${tumorID}"}
+    tag {"${normalID} -vs- ${tumorID}"}
     publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'copy'
+
 
     input:
         set val(normalID), file(normal_bam) from normalBAM_mutect
         set val(tumorID), file(tumor_bam) from tumorBAM_mutect
 
     output:
-        set val("mutect2"), tumorID, normalID, file( "${tumorID}_vs_${normalID}.vcf") into mutect2Output
+        set val("mutect2"), tumorID_short, normalID_short, file( "${tumorID_short}_vs_${normalID_short}.vcf") into mutect2Output
 
 
     script:
     tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
     normalID_short = normalID.substring(0, normalID.indexOf('.'))
     """
-            gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
-                Mutect2 \\
-                -R ${params.gfasta} \\
-                -I ${tumor_bam}  -tumor ${tumorID_short} \\
-                -I ${normal_bam} -normal ${normalID_short} \\
-                -L ${params.target} \\
-                -O ${tumorID_short}_vs_${normalID_short}.vcf
+    gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
+        Mutect2 \\
+        -R ${params.gfasta} \\
+        -I ${tumor_bam}  -tumor ${tumorID_short} \\
+        -I ${normal_bam} -normal ${normalID_short} \\
+        -L ${params.target} \\
+        -O ${tumorID_short}_vs_${normalID_short}.vcf
     """
     }
 
@@ -290,6 +288,7 @@ if(params.tbam) {
 =                               F U N C T I O N S                              =
 ================================================================================
 */
+
 
 def exoMessage() {
   // Display ExoSeq message
