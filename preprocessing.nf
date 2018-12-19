@@ -62,7 +62,7 @@ For more detailed information regarding the parameters and usage refer to packag
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
 // Output configuration
-params.outdir = "./preprocessing"
+params.outdir = "./results"
 params.saveAlignedIntermediates = false
 
 // Check blocks for certain required parameters, to see they are given and exist

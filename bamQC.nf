@@ -64,7 +64,7 @@ documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
 
 // Output configuration
-params.outdir = "./bamQC"
+params.outdir = "./results"
 params.saveAlignedIntermediates = false
 
 // Check blocks for certain required parameters, to see they are given and exist

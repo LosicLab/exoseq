@@ -67,7 +67,7 @@ documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 params.nbam = false
 params.tbam = false
 // Output configuration
-params.outdir = "./variantCall"
+params.outdir = "./results"
 params.saveIntermediateVariants = false
 params.snpCalling = false
 
