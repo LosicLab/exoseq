@@ -38,7 +38,7 @@ given. It is recommended to process one sample per nextflow run.
 The available paramaters are listed below based on category
 
 Required parameters:
-    --bam                         Absolute path to bam list (MUST use regex '*' in name)
+    --bamlist                         Absolute path to bam list (MUST use regex '*' in name)
     --genome                      Name of Genome reference, [Default: 'GRCh38']
 
 Required if running minerva profile:
@@ -61,23 +61,23 @@ Optional Parameters:
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
-params.bam = false
+params.bamlist = false
 
 // Output configuration
-params.outdir = "./xhmmCNVcalls"
+params.outdir = "./results"
 
 
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.nbam || !params.genome){
-    exit 1, "Parameters '--bam' and '--genome' are required to run the pipeline"
+if (!params.bamlist || !params.genome){
+    exit 1, "Parameters '--bamlist' and '--genome' are required to run the pipeline"
 }
 
 
 // Create a channel for input files
 Channel
-    .fromFilePairs(params.bam, size: 1)
-    .ifEmpty { exit 1, "Cannot find any bams matching: ${params.nbam}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
-    .into{normalBAM_mutect; normalBAM_hc}
+    .fromFilePairs(params.bamlist, size: 1)
+    .ifEmpty { exit 1, "Cannot find any bam list matching: ${params.bamList}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!" }
+    .into{ inputBamDOC; inputBamGC}
 
 
 // Show help when needed
@@ -148,19 +148,20 @@ try {
 }
 
 
+
 process depthOfCoverage {
     tag "${name}"
     publishDir "${params.outdir}/GATK", mode: 'copy'
 
     input:
-    set val(name), file() from inputBamGroup
+    set val(name), file(bamList) from inputBamDOC
 
     output:
     set val(name), file("${name}.DATA") into depthData, depthDataResults
 
     script:
     """
-    java -Xmx${task.memory.toGiga()}g ‐jar $GATK_JAR \\
+    java ‐jar $GATK_JAR -Xmx${task.memory.toGiga()}g \\
     ‐T DepthOfCoverage 
     ‐I $bamList \\
     ‐L $params.target \\
@@ -182,30 +183,14 @@ process depthOfCoverage {
 
 }
 
-process combineDOC {
-    tag "${name}"
-    publishDir "${params.outdir}/GATK", mode: 'copy'
-      
-    input:
-    
-    output:
-    set val(name), file("${name}.RD.txt") into combinedDepthData, depthOfCoverageResultsCombined
 
-
-    script:
-    """
-    xhmm ‐‐mergeGATKdepths \\
-    ‐o ${name}.RD.txt \\
-    ‐‐GATKdepths group1.DATA.sample_interval_summary \\
-    ‐‐GATKdepths group2.DATA.sample_interval_summary
-    """
-}
 
 process getGCcontent {
     tag "${name}"
     publishDir "${params.outdir}/GATK", mode: 'copy'
     
     input:
+    set val(name), file(bamList) from inputBamGC
 
     output:
     set val(name), file("${name}.locus_GC.txt") into gcContentData
@@ -214,18 +199,16 @@ process getGCcontent {
 
     script:
     """
-    java -Xmx${task.memory.toGiga()}g ‐jar $GATK_JAR \\
+    java ‐jar $GATK_JAR  -Xmx${task.memory.toGiga()}g \\
+    -I $bamList \\
     ‐T GCContentByInterval \\
     ‐L $params.target \\
     ‐R $params.gfasta \\
-    ‐o ${name}.locus_GC.txt \\
+    ‐o ${name}.locus_GC.txt
 
-
-    cat ${name}.locus_GC.txt | awk '{if ($2 < 0.1 ∥︀ $2 > 0.9) print $1}'
+    cat ${name}.locus_GC.txt | awk '{if (${2} < 0.1 ∥︀ ${2} > 0.9) print ${1}}'
     > ${name}.extreme_gc_targets.txt
     """
-
-
 }
 
 
@@ -235,12 +218,12 @@ process filterAndPrep {
     
     
     input:
-    set val(name), file(inputList) from combinedDepthData
+    set val(name), file(inputList) from depthData
     set val(name), file(extremeGC) from extremeGCtargets
 
     output:
     set val(name), file("${name}_filtered_targets.txt"), file("${name}_filtered_samples.txt") into excludedOutputResults, excludedOutputs
-    set val(name), file("${name}_filtered_centered.RD.txt") into filteredPreppedMatrix, filterPrepMatrixResults
+    set val(name), file("${name}_filtered_centered.RD.txt") into filteredPreppedMatrix, originalMatrix, filterPrepMatrixResults, filteredPreppedMatrixForNorm
 
     script:
     """
@@ -288,12 +271,11 @@ process normalizePCA {
     publishDir "${params.outdir}/xhmm/", mode: 'copy'
 
     input:
-    set val(name), file(filteredMatrix) from filteredPreppedMatrix
+    set val(name), file(filteredMatrix) from filteredPreppedMatrixForNorm
     set val(name), file(mcPCAdata) from mcPCAfiles
 
     output:
     set val(name), file("${name}.PCA_normalized.txt") into normalizedPCs, normalizedPCresults
-
 
     script:
     """
@@ -309,56 +291,64 @@ process normalizePCA {
 process calcZscores {
    tag "${name}"
     publishDir "${params.outdir}/xhmm/", mode: 'copy'
-     
-    input:
     
+    input:
+    set val(name), file(sMatrix) from originalMatrix
 
     output:
-    
+    set val(name), file("${name}.sample_zscores.txt") into zScores, zScoreResults, zScoresForStats
+    set val(name), file("${name}.zscores.filtered_targets.txt"), file("${name}.zscores.filtered_samples.txt") into excludedzscoreResults, excludedzscoreOutputs
+   
 
     script:
     """
     xhmm ‐‐matrix \\
-    -r $originalMatrix \\
+    -r $sMatrix \\
     ‐‐centerData ‐‐centerType sample \\
     ‐‐zScoreData \\
-    ‐o ${name}.PCA_normalized.filtered.sample_zscores.RD.txt \\
-    ‐‐outputExcludedTargets ${name}.PCA_normalized.filtered.sample_zscores.RD.txt.filtered_targets.txt \\
-    ‐‐outputExcludedSamples ${name}.PCA_normalized.filtered.sample_zscores.RD.txt.filtered_samples.txt \\
+    ‐o ${name}.sample_zscores.txt \\
+    ‐‐outputExcludedTargets ${name}.zscores.filtered_targets.txt \\
+    ‐‐outputExcludedSamples ${name}.zscores.filtered_samples.txt \\
     ‐‐maxSdTargetRD 30
     """
 }
 
 
-
+/*
 process cnvDiscovery {
    tag "${name}"
     publishDir "${params.outdir}/xhmm_Discovery/", mode: 'copy'
      
     input:
-    
+    set val(name), file(zscoreMatrix) from zScores
 
     output:
-    
+    set val(name), file("${name}.xcnv") into xcnvResults, xcnvOut
+    set val (name), file("${name}.aux_xcnv") into auxcnvReults, auxcnvOut
+    set val(name), file("")
 
     script:
     """
+    echo '1e-8	6	70	-3	1.00	0	1.00	3	1.00'>./params.txt
+
     xhmm ‐-discover \\
     -p params.txt \\
     -r $zscoreMatrix \\
-    ‐R ${name}.same_filtered.RD.txt
-    ‐c ${name}.xcnv 
-    ‐a ${name}.aux_xcnv 
+    ‐R ${name}.same_filtered.RD.txt \\
+    ‐c ${name}.xcnv \\
+    ‐a ${name}.aux_xcnv \\
     ‐s ${name}
     """
 }
+*/
 
+/*
 process cnvStats {
    tag "${name}"
     publishDir "${params.outdir}/xhmm_STATS/", mode: 'copy'
      
     input:
-    
+     set val(name), file(zscoreMatrix) from zScoresForStats
 
     output:
     
@@ -367,13 +357,14 @@ process cnvStats {
     """
     xhmm ‐‐genotype \\
     ‐p params.txt \\
-    ‐r ${name}.PCA_normalized.filtered.sample_zscores.RD.txt \\
+    ‐r ${name}.sample_zscores.txt \\
     ‐R ${name}.same_filtered.RD.txt \\
     ‐g ${name}.xcnv \\
     ‐F $params.gfasta \\
     ‐v ${name}_cnv.vcf
     """
 }
+*/
 
 /*
 ================================================================================

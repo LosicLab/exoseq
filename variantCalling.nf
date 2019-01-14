@@ -263,7 +263,7 @@ if(params.tbam) {
         set val(tumorID), file(tumor_bam) from tumorBAM_mutect
 
     output:
-        set val("mutect2"), tumorID_short, normalID_short, file( "${tumorID_short}_vs_${normalID_short}.vcf") into mutect2Output
+        set val("mutect2"), tumorID_short, normalID_short, file( "${tumorID_short}_vs_${normalID_short}.vcf") into mutect2Output, mutectCallsToFilter
 
 
     script:
@@ -280,6 +280,24 @@ if(params.tbam) {
     """
     }
 
+    process filterMutectCalls {
+    tag {"${normalID_short} -vs- ${tumorID_short}"}
+    publishDir "${params.outdir}/mutect2_filteredCalls/", mode: 'copy'
+
+    input:
+    set val("mutect2"), tumorID_short, normalID_short, file(vcf) from mutectCallsToFilter
+
+    output:
+    set val("mutect2"), tumorID_short, normalID_short, file("${tumorID_short}_vs_${normalID_short}_filtered.vcf") into mutect2FilteredOut
+    
+    script:
+    """
+    gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
+       FilterMutectCalls \\
+       -V ${vcf} \\
+       -O ${tumorID_short}_vs_${normalID_short}_filtered.vcf
+    """
+    }
 }
 
 
