@@ -29,7 +29,7 @@ The LosicLab pipeline comes with the documentation forked from the original nf-c
 4. [Output and how to interpret the results](docs/output.md)
 5. [Troubleshooting](docs/troubleshooting.md)
 
-Additionally, an example script for running the pipeline can be found in the `docs/` directory as well. It has support for the MSSM Minerva HPC.
+The pipeline now also has support for the MSSM Minerva HPC.
 
 ## Credits
 The original nf-core/exoseq pipeline was initally developed by Senthilkumar Panneerselvam ([@senthil10](https://github.com/senthil10)) with a little help from Phil Ewels ([@ewels](https://github.com/ewels)) at the National Genomics Infrastructure, part of SciLifeLab in Stockholm and has been extended by Alex Peltzer ([@apeltzer](https://github.com/apeltzer)), Marie Gauder ([@mgauder](https://github.com/mgauder)) from QBIC Tuebingen/Germany as well as Marc Hoeppner ([@marchoeppner](https://github.com/marchoeppner)) from IKMB Kiel/Germany.
