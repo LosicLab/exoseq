@@ -1,28 +1,20 @@
-# ![nf-core/ExoSeq](https://raw.githubusercontent.com/nf-core/Exoseq/master/docs/images/ExoSeq_logo.png)
-[![Build Status](https://travis-ci.org/nf-core/ExoSeq.svg?branch=master)](https://travis-ci.org/nf-core/ExoSeq)
-[![Nextflow](https://img.shields.io/badge/nextflow-%E2%89%A50.27.6-brightgreen.svg)](https://www.nextflow.io/)
-[![Gitter](https://img.shields.io/badge/gitter-%20join%20chat%20%E2%86%92-4fb99a.svg)](https://gitter.im/nf-core/exoseq)
-[![Docker Container available](https://img.shields.io/docker/automated/nfcore/exoseq.svg)](https://hub.docker.com/r/nfcore/exoseq/)
-![Singularity Container available](https://img.shields.io/badge/singularity-available-7E4C74.svg)
+# LosicLab/exoseq
 
-**This is still work in practice, but will hopefully soon be a stable version that will then be published in a release version.**
 ## Introduction
 
-**nfcore/ExoSeq** is a bioinformatics analysis pipeline that performs best-practice analysis pipeline for Exome Sequencing data.
+**LosicLab/ExoSeq** is a bioinformatics analysis pipeline that performs best-practice analysis pipeline for Exome Sequencing data. It is forked from nfcore/ExoSeq.
 
 The pipeline is built based on [GATK](https://software.broadinstitute.org/gatk/best-practices/) best practices using [Nextflow](https://www.nextflow.io), a bioinformatics workflow tool. The main steps done by pipeline are the following (more information about the processes can be found [here](docs/processes.md)).
 
-* Alignment
-* Marking Duplicates
-* Recalibration
-* Realignment
-* Variant Calling
-* Variant Filtration
-* Variant Evaluation
-* Variant Annotation
+* Alignment - bwa
+* Marking Duplicates - picard
+* Recalibration - gatk 4
+* Realignment - gatk 4
+* Variant Calling (Somatic or SNP) - gatk 4
+* Variant Filtration - gatk 4
 
 ## Documentation
-The nfcore/ExoSeq pipeline comes with documentation about the pipeline, found in the `docs/` directory:
+The LosicLab pipeline comes with the documentation forked from the original nf-core repository, found in the `docs/` directory:
 
 1. [Pipeline installation and configuration instructions](docs/installation.md)
 2. Pipeline configuration
@@ -37,7 +29,9 @@ The nfcore/ExoSeq pipeline comes with documentation about the pipeline, found in
 4. [Output and how to interpret the results](docs/output.md)
 5. [Troubleshooting](docs/troubleshooting.md)
 
+Additionally, an example script for running the pipeline can be found in the `docs/` directory as well. It has support for the MSSM Minerva HPC.
+
 ## Credits
-The pipeline was initally developed by Senthilkumar Panneerselvam ([@senthil10](https://github.com/senthil10)) with a little help from Phil Ewels ([@ewels](https://github.com/ewels)) at the National Genomics Infrastructure, part of SciLifeLab in Stockholm and has been extended by Alex Peltzer ([@apeltzer](https://github.com/apeltzer)), Marie Gauder ([@mgauder](https://github.com/mgauder)) from QBIC Tuebingen/Germany as well as Marc Hoeppner ([@marchoeppner](https://github.com/marchoeppner)) from IKMB Kiel/Germany.
+The original nf-core/exoseq pipeline was initally developed by Senthilkumar Panneerselvam ([@senthil10](https://github.com/senthil10)) with a little help from Phil Ewels ([@ewels](https://github.com/ewels)) at the National Genomics Infrastructure, part of SciLifeLab in Stockholm and has been extended by Alex Peltzer ([@apeltzer](https://github.com/apeltzer)), Marie Gauder ([@mgauder](https://github.com/mgauder)) from QBIC Tuebingen/Germany as well as Marc Hoeppner ([@marchoeppner](https://github.com/marchoeppner)) from IKMB Kiel/Germany.
 
 Many thanks also to others who have helped out along the way too, including [@pditommaso](https://github.com/pditommaso), [@colindaven](https://github.com/colindaven).
