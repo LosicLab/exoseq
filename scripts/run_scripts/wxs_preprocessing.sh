@@ -19,7 +19,7 @@ pipeline='/sc/orga/projects/losicb01a/common_folder/nextflow-pipelines/sandbox/e
 #mkdir -p $rundir
 cd $rundir
 
-inputfq="*/tiny*{R1,R2}*.fastq.gz"
+inputfq="tiny*{R1,R2}*.fastq.gz"
 
 module purge
 module load openssl

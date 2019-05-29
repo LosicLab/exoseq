@@ -154,7 +154,32 @@ try {
 
 // merge multi-lane bams if necessary
 if(! params.multiLane){
-    mergedBamForMkDup = inputBam
+        process mergeBamFiles {
+        tag "${name}"
+        publishDir "${params.outdir}/mergedBamFiles", mode: 'copy'
+
+        input:
+        set val(name), file(bam), file(bai) from inputBam
+
+        output:
+        set val(name), file("${name}.sorted.bam"), file("${name}.sorted.bai") into mergedBamResults, mergedBamForMkDup
+
+        script:
+        def avail_mem = task.memory ? "${task.memory.toMega().intdiv(task.cpus)}M" : ''
+
+        """
+        java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
+        I=$bam \\
+        O=${name}.sorted.bam \\
+        RGID=${name} \\
+        RGLB=${name} \\
+        RGPL=illumina \\
+        RGPU=${name} \\
+        RGSM=${name} \\
+        SORT_ORDER=coordinate  \\
+        CREATE_INDEX=TRUE
+        """
+    }
 
 }else{
     
@@ -177,14 +202,14 @@ if(! params.multiLane){
 
         java -Xmx${task.memory.toGiga()}g -jar $PICARD AddOrReplaceReadGroups \\
         I=${name}.bam \\
-        O=${name}.sorted.bam \\
+        O=${name}sorted.bam \\
         RGID=${name} \\
         RGLB=${name} \\
         RGPL=illumina \\
         RGPU=${name} \\
         RGSM=${name} \\
         SORT_ORDER=coordinate  \\
-        CREATE_INDEX=TRUE \\
+        CREATE_INDEX=TRUE
         """
     }
 
