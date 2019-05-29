@@ -270,7 +270,7 @@ process bwamem {
     file(bwa_index) from bwa_index
 
     output:
-    set val(name), file("${name}_bwa.bam") into bamResults, bam_metrics
+    set val(name), file("${name}.bam") into bamResults, bam_metrics
     file '.command.log' into bwa_stdout
 
     script:
@@ -283,14 +283,14 @@ process bwamem {
     -R $rg \\
     -t ${task.cpus} \\
     $params.gfasta \\
-    $reads | samtools sort -m ${avail_mem} -O bam -T - >${name}_bwa.bam
+    $reads | samtools sort -m ${avail_mem} -O bam -T - >${name}.bam
     """
 }
 
 // calculate QC metrics for bam files with Picard
 process collectMultiMetrics {
     tag "${name}"
-    publishDir "${params.outdir}/${name}/picard_multimetrics", mode: 'copy'
+    publishDir "${params.outdir}/picard_multimetrics", mode: 'copy'
     input:
     set val(name), file(realign_bam), file(realign_bam_ind) from bam_metrics
 

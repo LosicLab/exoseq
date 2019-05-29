@@ -16,7 +16,7 @@ module load openssl
 module load anaconda
 module load nextflow/0.30.2
 
-inputBAM="*/bwamem-Align/tiny*.bam"
+inputBAM="bwamem-Align/tiny*.bam"
 
 module load nextflow/0.30.2
 
