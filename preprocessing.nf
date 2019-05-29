@@ -57,6 +57,7 @@ Optional Parameters:
     --singleEnd                   input reads are single-end [Default: paired-end]
     --saveAlignedIntermediates    [Default: false]
     --saveIntermediateVariants    [Default: false]
+    --notrim                      skip read clipping on FASTQs? [Default: false]
 
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
@@ -159,6 +160,8 @@ if(! params.bwa_index){
     // Create a BWA index for non-indexed genomes
     process makeBWAIndex {
 
+        conda 'environment.yml'
+
 
         tag "$params.gfasta"
         publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
@@ -203,8 +206,7 @@ if(! params.bwa_index){
 process fastqc {
 
     tag "$name"
-        publishDir "${params.outdir}/fastqc", mode: 'copy',
-        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
+        publishDir "${params.outdir}/fastqc", mode: 'copy'
 
         input:
         set val(name), file(reads) from read_files_fastqc
@@ -227,8 +229,7 @@ if(params.notrim){
 } else {
     process trim_galore {
         tag "$name"
-        publishDir "${params.outdir}/trim_galore", mode: 'copy',
-        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
+        publishDir "${params.outdir}/trim_galore", mode: 'copy'
 
         input:
         set val(name), file(reads) from read_files_trimming
@@ -262,8 +263,7 @@ if(params.notrim){
 process bwamem {
 
     tag "${name}"
-    publishDir "${params.outdir}/bwamem-Align/", mode: 'copy',
-        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
+    publishDir "${params.outdir}/bwamem-Align/", mode: 'copy'
 
     input:
     set val(name), file(reads) from trimmed_reads
@@ -290,22 +290,20 @@ process bwamem {
 // calculate QC metrics for bam files with Picard
 process collectMultiMetrics {
     tag "${name}"
-    publishDir "${params.outdir}/${name}/picard_multimetrics", mode: 'copy',
-        saveAs: { filename -> filename.indexOf("*") > 0 ? filename : null }
-
+    publishDir "${params.outdir}/${name}/picard_multimetrics", mode: 'copy'
     input:
     set val(name), file(realign_bam), file(realign_bam_ind) from bam_metrics
 
     output:
-    file "${name}.multimetrics.*" into unmerged_picard_multimetrics
+    file "${name}.unrecal.multimetrics*" into unmerged_picard_multimetrics
     file '.command.log' into unmerged_bam_qc_stdout
 
     script:
     """
     java -Xmx${task.memory.toGiga()}g -jar $PICARD CollectMultipleMetrics \\
       I=$realign_bam \\
-      O=${name}.multimetrics \\
-      R=$params.gfasta \\
+      O=${name}.unrecal.multimetrics \\
+      R=$params.gfasta
     """
 }
 

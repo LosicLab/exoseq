@@ -270,13 +270,13 @@ if(params.tbam) {
     tumorID_short = tumorID.substring(0, tumorID.indexOf('.'))
     normalID_short = normalID.substring(0, normalID.indexOf('.'))
     """
-    gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
-        Mutect2 \\
-        -R ${params.gfasta} \\
-        -I ${tumor_bam}  -tumor ${tumorID_short} \\
-        -I ${normal_bam} -normal ${normalID_short} \\
-        -L ${params.target} \\
-        -O ${tumorID_short}_vs_${normalID_short}.vcf
+    java -jar -Xmx${task.memory.toGiga()}g $GATK \\
+    Mutect2 \\
+    -R ${params.gfasta} \\
+    -I ${tumor_bam}  -tumor ${tumorID_short} \\
+    -I ${normal_bam} -normal ${normalID_short} \\
+    -L ${params.target} \\
+    -O ${tumorID_short}_vs_${normalID_short}.vcf 
     """
     }
 
@@ -292,10 +292,10 @@ if(params.tbam) {
     
     script:
     """
-    gatk --java-options "-Xmx${task.memory.toGiga()}g" \\
-       FilterMutectCalls \\
-       -V ${vcf} \\
-       -O ${tumorID_short}_vs_${normalID_short}_filtered.vcf
+    java -jar -Xmx${task.memory.toGiga()}g $GATK \\
+    FilterMutectCalls \\
+    -V ${vcf} \\
+    -O ${tumorID_short}_vs_${normalID_short}_filtered.vcf
     """
     }
 }
