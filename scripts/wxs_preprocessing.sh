@@ -15,14 +15,14 @@ inputfq="tiny*{R1,R2}*.fastq.gz"
 ref="hg38"
 
 # Path to directory containing the pipeline to run
-pipeline='/sc/orga/projects/losicb01a/common_folder/nextflow-pipelines/sandbox/exoseq'
+pipeline='/sc/orga/projects/losicb01a/common_folder/nextflow-pipelines/exoseq'
 #mkdir -p $rundir
 cd $rundir
 
 module purge
 module load openssl
 module load anaconda
-module load nextflow/0.30.2
+module load nextflow
 
 nextflow run $pipeline/preprocessing.nf \
 --outdir $rundir \
@@ -31,4 +31,4 @@ nextflow run $pipeline/preprocessing.nf \
 --notrim "true" \
 --saveAlignedIntermediates "true" \
 -resume \
--profile chimera_local # local | minerva
+-profile chimera_local
