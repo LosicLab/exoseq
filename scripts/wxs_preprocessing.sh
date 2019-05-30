@@ -9,17 +9,15 @@
 
 # Run directory. Pipeline outputs to $rundir/preprocessing
 rundir=$PWD"/testdata/tiny"
-
+inputfq="tiny*{R1,R2}*.fastq.gz"
 
 # Reference genome to use [Default: GRCh38; other refs not yet supported]
-ref="GRCh38"
+ref="hg38"
 
 # Path to directory containing the pipeline to run
 pipeline='/sc/orga/projects/losicb01a/common_folder/nextflow-pipelines/sandbox/exoseq'
 #mkdir -p $rundir
 cd $rundir
-
-inputfq="tiny*{R1,R2}*.fastq.gz"
 
 module purge
 module load openssl

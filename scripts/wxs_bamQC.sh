@@ -4,7 +4,7 @@
 rundir=$PWD"/testdata/tiny"
 
 # Reference genome to use [Default: GRCh38; other refs not yet supported]
-ref="GRCh38"
+ref="hg38"
 
 # Path to directory containing the pipeline to run
 pipeline='/sc/orga/projects/losicb01a/common_folder/nextflow-pipelines/sandbox/exoseq'
