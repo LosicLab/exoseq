@@ -283,7 +283,7 @@ if(params.tbam) {
     }
 
     process filterMutectCalls {
-    tag {"${tumorID_short} -vs- ${normalID_short}: ${idx}"}
+    tag {"${tumorID_short} -vs- ${normalID_short}"}
     publishDir "${params.outdir}/mutect2_filteredCalls", mode: 'copy'
 
     input:
