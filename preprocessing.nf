@@ -62,15 +62,11 @@ Optional Parameters:
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
-// Output configuration
-params.outdir = "./results"
-params.saveAlignedIntermediates = false
 
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.reads || !params.genome){
-    exit 1, "Parameters '--reads' and '--genome' are required to run the pipeline"
+if (!params.reads){
+    exit 1, "Parameter '--reads' is required to run the pipeline"
 }
-
 
 // Show help when needed
 if (params.help){
@@ -159,10 +155,6 @@ if(! params.bwa_index){
         .fromPath("${params.gfasta}")
     // Create a BWA index for non-indexed genomes
     process makeBWAIndex {
-
-        conda 'environment.yml'
-
-
         tag "$params.gfasta"
         publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
                    saveAs: { params.saveReference ? it : null }, mode: 'symlink'

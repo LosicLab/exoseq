@@ -64,17 +64,10 @@ Optional Parameters:
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
-params.nbam = false
-params.tbam = false
-// Output configuration
-params.outdir = "./results"
-params.saveIntermediateVariants = false
-params.snpCalling = false
-
 
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.nbam || !params.genome){
-    exit 1, "Parameters '--sample' and '--genome' are required to run the pipeline"
+if (!params.nbam){
+    exit 1, "Parameter '--nbam' is required to run the pipeline"
 }
 
 
@@ -290,7 +283,7 @@ if(params.tbam) {
     set val("mutect2"), tumorID_short, normalID_short, file(vcf) from mutectCallsToFilter
 
     output:
-    set val("mutect2"), tumorID_short, normalID_short, file("${tumorID_short}_vs_${normalID_short}_filtered.vcf") into mutect2FilteredOut
+    set val("mutect2"), tumorID_short, normalID_short, file("${tumorID_short}_vs_${normalID_short}_filtered.vcf") into mutect2FilteredOut, vcfToAnnotate
     
     script:
     """
@@ -298,6 +291,32 @@ if(params.tbam) {
     FilterMutectCalls \\
     -V ${vcf} \\
     -O ${tumorID_short}_vs_${normalID_short}_filtered.vcf
+    """
+    }
+
+    process annotateVariants {
+    tag {"${tumorID_short} -vs- ${normalID_short}"}
+    publishDir "${params.outdir}/annovarOut", mode: 'copy'
+
+    input:
+    set val("mutect2"), tumorID_short, normalID_short, file(vcf) from vcfToAnnotate
+
+    output:
+    file("${tumorID_short}_vs_${normalID_short}_filtered_annovar*") into annovarVCFout
+    
+    script:
+    """
+    ${ANNOVAR} ${vcf} ${ANNOVAR_DB} \\
+    --buildver "${params.genome}" \\
+    --vcfinput \\
+    --thread ${task.cpus} \\
+    --polish \\
+    --outfile ${tumorID_short}_vs_${normalID_short}_filtered_annovar \\
+    --remove \\
+    --protocol refGene,cytoBand,dbnsfp33a \\
+    --nastring . \\
+    --operation g,r,f \\
+    --onetranscript --verbose
     """
     }
 }

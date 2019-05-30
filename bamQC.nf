@@ -62,16 +62,10 @@ Optional Parameters:
 For more detailed information regarding the parameters and usage refer to package
 documentation at https://github.com/nf-core/ExoSeq""".stripIndent()
 
-
-// Output configuration
-params.outdir = "./results"
-params.saveAlignedIntermediates = false
-
 // Check blocks for certain required parameters, to see they are given and exist
-if (!params.bam || !params.genome){
-    exit 1, "Parameters '--bam' and '--genome' are required to run the pipeline"
+if (!params.bam){
+    exit 1, "Parameter '--bam' is required to run the pipeline"
 }
-
 
 // Show help when needed
 if (params.help){
