@@ -252,10 +252,11 @@ if(params.snpCalling){
 
 
 if(params.tbam) {
+
     // This will give as a list of unfiltered calls for MuTect2.
     process callSomaticVariants {
-    tag {"${normalID} -vs- ${tumorID}"}
-    publishDir "${params.outdir}/mutect2_somaticVariants/", mode: 'copy'
+    tag {"${tumorID} -vs- ${normalID}" }
+    publishDir "${params.outdir}/mutect2_somaticVariants", mode: 'copy'
 
 
     input:
@@ -276,13 +277,14 @@ if(params.tbam) {
     -I ${tumor_bam}  -tumor ${tumorID_short} \\
     -I ${normal_bam} -normal ${normalID_short} \\
     -L ${params.target} \\
+    --germline-resource ${params.dbsnp} \\
     -O ${tumorID_short}_vs_${normalID_short}.vcf 
     """
     }
 
     process filterMutectCalls {
-    tag {"${normalID_short} -vs- ${tumorID_short}"}
-    publishDir "${params.outdir}/mutect2_filteredCalls/", mode: 'copy'
+    tag {"${tumorID_short} -vs- ${normalID_short}: ${idx}"}
+    publishDir "${params.outdir}/mutect2_filteredCalls", mode: 'copy'
 
     input:
     set val("mutect2"), tumorID_short, normalID_short, file(vcf) from mutectCallsToFilter
